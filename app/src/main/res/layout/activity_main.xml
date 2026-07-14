@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <Button
+        android:id="@+id/captureButton"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:text="촬영"
+        android:textSize="16sp"
+        android:background="#667eea"
+        android:textColor="#ffffff" />
+
+    <TextView
+        android:id="@+id/resultText"
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:text="준비 중..."
+        android:textColor="#ffffff"
+        android:textSize="14sp"
+        android:padding="12dp"
+        android:background="#1a1a1a"
+        android:scrollbars="vertical" />
+
+</LinearLayout>
