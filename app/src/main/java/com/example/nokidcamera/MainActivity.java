@@ -188,28 +188,13 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
 
     private String extractAnswer(String jsonResponse) {
         try {
-            // candidates[0].content.parts[0].text 파싱
-            String marker = "\"text\": \"";
-            int startIdx = jsonResponse.indexOf(marker);
-            if (startIdx == -1) return "응답 없음: " + jsonResponse.substring(0, Math.min(200, jsonResponse.length()));
-            startIdx += marker.length();
-            StringBuilder sb = new StringBuilder();
-            int i = startIdx;
-            while (i < jsonResponse.length()) {
-                char c = jsonResponse.charAt(i);
-                if (c == '\\' && i + 1 < jsonResponse.length()) {
-                    char next = jsonResponse.charAt(i + 1);
-                    if (next == 'n') { sb.append('\n'); i += 2; continue; }
-                    if (next == '"') { sb.append('"'); i += 2; continue; }
-                    if (next == '\\') { sb.append('\\'); i += 2; continue; }
-                }
-                if (c == '"') break;
-                sb.append(c);
-                i++;
-            }
-            return sb.toString();
+            org.json.JSONObject root = new org.json.JSONObject(jsonResponse);
+            org.json.JSONArray candidates = root.getJSONArray("candidates");
+            org.json.JSONObject content = candidates.getJSONObject(0).getJSONObject("content");
+            org.json.JSONArray parts = content.getJSONArray("parts");
+            return parts.getJSONObject(0).getString("text");
         } catch (Exception e) {
-            return "응답 파싱 오류: " + e.getMessage();
+            return "파싱 오류: " + e.getMessage() + "\n원본: " + jsonResponse.substring(0, Math.min(300, jsonResponse.length()));
         }
     }
 
