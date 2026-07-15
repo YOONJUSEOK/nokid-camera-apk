@@ -1,148 +1,48 @@
 name: Build APK
 
-
-
 on:
-
   push:
-  
     branches: [ main, master ]
-    
   pull_request:
-  
     branches: [ main, master ]
-    
   workflow_dispatch:
-  
-
 
 jobs:
-
   build:
-  
     runs-on: ubuntu-latest
-    
-
 
     steps:
-    
     - name: Checkout code
-    
       uses: actions/checkout@v4
-      
-
 
     - name: Set up JDK 17
-    
       uses: actions/setup-java@v4
-      
       with:
-      
         java-version: '17'
-        
         distribution: 'temurin'
-        
         cache: gradle
-        
-
 
     - name: Grant execute permission for gradlew
-    
       run: chmod +x gradlew
-      
-
 
     - name: Build APK with Gradle
-    
       run: ./gradlew assembleRelease
-      
       env:
-      
         GRADLE_OPTS: "-Xmx4096m"
-        
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        
-
 
     - name: Sign APK
-    
       run: |
-      
         UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
-        
-        keytool -genkey -v -keystore nokid-keystore.jks \
-        
-          -alias nokid-key -keyalg RSA -keysize 2048 -validity 10000 \
-          
-          -dname "CN=Nokid, OU=Dev, O=Nokid, L=Seoul, S=Seoul, C=KR" \
-          
-          -storepass nokid1234 -keypass nokid1234
-          
+        echo "Found APK: $UNSIGNED_APK"
+        keytool -genkeypair -v -keystore nokid-keystore.jks -alias nokid-key -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Nokid,OU=Dev,O=Nokid,L=Seoul,S=Seoul,C=KR" -storepass nokid1234 -keypass nokid1234 -noprompt
         zipalign -v 4 "$UNSIGNED_APK" app-release-aligned.apk
-        
-        apksigner sign --ks nokid-keystore.jks \
-        
-          --ks-key-alias nokid-key \
-          
-          --ks-pass pass:nokid1234 \
-          
-          --key-pass pass:nokid1234 \
-          
-          --out app-release-signed.apk \
-          
-          app-release-aligned.apk
-          
-
+        apksigner sign --ks nokid-keystore.jks --ks-key-alias nokid-key --ks-pass pass:nokid1234 --key-pass pass:nokid1234 --out app-release-signed.apk app-release-aligned.apk
+        echo "APK signed successfully"
 
     - name: Upload Signed APK as Artifact
-    
       uses: actions/upload-artifact@v4
-      
       with:
-      
         name: app-release-signed
-        
         path: app-release-signed.apk
-        
         retention-days: 30
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
