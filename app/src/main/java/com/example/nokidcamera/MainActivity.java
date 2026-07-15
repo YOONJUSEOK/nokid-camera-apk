@@ -4,24 +4,22 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.hardware.SensorEvent;
-import android.hardware.SensorManager;
-import android.hardware.Sensor;
 import android.media.AudioManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.Base64;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.widget.Button;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
+import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
@@ -32,9 +30,10 @@ import com.google.common.util.concurrent.ListenableFuture;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -42,22 +41,26 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
-public class MainActivity extends AppCompatActivity implements android.hardware.SensorEventListener {
+public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final String TAG = "NokidCamera";
+
     private PreviewView previewView;
     private Button captureButton;
     private TextView resultText;
     private ImageCapture imageCapture;
     private Camera camera;
     private ProcessCameraProvider cameraProvider;
-    private SensorManager sensorManager;
-    private Sensor accelerometer;
-    private Sensor gyroscope;
-    private float[] lastAccel = new float[3];
-    private float[] lastGyro = new float[3];
-    private float[] gravity = new float[]{0f, 0f, 9.8f};
+
+    // 카메라 프레임 모션 감지 변수
     private long lastCaptureTime = 0;
-    private static final long CAPTURE_DELAY = 2000;
+    private static final long CAPTURE_DELAY = 3000; // 촬영 후 3초 쿨다운
+    private static final long STABLE_DURATION = 1500; // 1.5초 안정 후 촬영
+    private double lastFrameAvg = -1;
+    private long motionStartTime = 0;
+    private boolean motionDetected = false;
+    private boolean isAnalyzing = false;
+
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
     @Override
@@ -74,11 +77,6 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
         if (audioManager != null) {
             audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0);
         }
-
-        // 센서 초기화
-        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
-        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
 
         // 권한 확인
         if (allPermissionsGranted()) {
@@ -109,7 +107,19 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
         Preview preview = new Preview.Builder().build();
         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-        imageCapture = new ImageCapture.Builder().build();
+        imageCapture = new ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build();
+
+        // 카메라 프레임 분석기 설정
+        ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build();
+
+        imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(), image -> {
+            analyzeFrame(image);
+            image.close();
+        });
 
         CameraSelector cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(CameraSelector.LENS_FACING_BACK)
@@ -117,10 +127,58 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
 
         try {
             cameraProvider.unbindAll();
-            camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
-            resultText.setText("카메라 준비 완료");
+            camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture, imageAnalysis);
+            runOnUiThread(() -> resultText.setText("준비 완료 — 시험지를 카메라 앞에 놓으세요"));
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * 카메라 프레임 밝기 평균을 비교하여 움직임 감지
+     * 움직임이 멈추고 1.5초 안정되면 자동 촬영
+     */
+    private void analyzeFrame(ImageProxy image) {
+        if (isAnalyzing) return;
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastCaptureTime < CAPTURE_DELAY) return;
+
+        // Y 채널(밝기)에서 평균값 계산
+        ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
+        int ySize = yBuffer.remaining();
+        // 성능을 위해 전체 픽셀의 1/16만 샘플링
+        long sum = 0;
+        int count = 0;
+        for (int i = 0; i < ySize; i += 16) {
+            sum += (yBuffer.get(i) & 0xFF);
+            count++;
+        }
+        double currentAvg = (count > 0) ? (double) sum / count : 0;
+
+        if (lastFrameAvg < 0) {
+            lastFrameAvg = currentAvg;
+            return;
+        }
+
+        double diff = Math.abs(currentAvg - lastFrameAvg);
+        lastFrameAvg = currentAvg;
+
+        // 변화 감지 임계값: 밝기 평균 차이 1.5 이상 = 움직임
+        if (diff > 1.5) {
+            motionDetected = true;
+            motionStartTime = currentTime;
+            runOnUiThread(() -> resultText.setText("움직임 감지 중... (멈추면 촬영)"));
+        } else {
+            // 움직임이 있었고, 1.5초 이상 안정된 경우 촬영
+            if (motionDetected && (currentTime - motionStartTime) > STABLE_DURATION) {
+                motionDetected = false;
+                lastCaptureTime = currentTime;
+                isAnalyzing = true;
+                runOnUiThread(() -> {
+                    resultText.setText("📸 안정 감지 → 촬영 중...");
+                    capturePhoto();
+                });
+            }
         }
     }
 
@@ -140,6 +198,7 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
 
                     @Override
                     public void onError(@NonNull ImageCaptureException exception) {
+                        isAnalyzing = false;
                         resultText.setText("촬영 실패: " + exception.getMessage());
                     }
                 });
@@ -174,6 +233,7 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
                 String responseBody = response.body().string();
 
                 runOnUiThread(() -> {
+                    isAnalyzing = false;
                     if (response.isSuccessful()) {
                         resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
                     } else {
@@ -181,7 +241,10 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
                     }
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> resultText.setText("오류: " + e.getMessage()));
+                runOnUiThread(() -> {
+                    isAnalyzing = false;
+                    resultText.setText("오류: " + e.getMessage());
+                });
             }
         }).start();
     }
@@ -199,40 +262,6 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
     }
 
     @Override
-        public void onSensorChanged(SensorEvent event) {
-        long currentTime = System.currentTimeMillis();
-        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-            // 저역통과 필터로 중력 성분 추출
-            final float alpha = 0.8f;
-            gravity[0] = alpha * gravity[0] + (1 - alpha) * event.values[0];
-            gravity[1] = alpha * gravity[1] + (1 - alpha) * event.values[1];
-            gravity[2] = alpha * gravity[2] + (1 - alpha) * event.values[2];
-            // 중력 제거 후 순수 움직임
-            float ax = event.values[0] - gravity[0];
-            float ay = event.values[1] - gravity[1];
-            float az = event.values[2] - gravity[2];
-            float linearAccel = (float) Math.sqrt(ax * ax + ay * ay + az * az);
-            if (linearAccel > 3.0f && currentTime - lastCaptureTime > CAPTURE_DELAY) {
-                lastCaptureTime = currentTime;
-                runOnUiThread(() -> resultText.setText("모션 감지 → 촬영 중..."));
-                capturePhoto();
-            }
-        } else if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
-            lastGyro = event.values.clone();
-            float gyroMagnitude = (float) Math.sqrt(lastGyro[0] * lastGyro[0] +
-                    lastGyro[1] * lastGyro[1] + lastGyro[2] * lastGyro[2]);
-            if (gyroMagnitude > 2.0f && currentTime - lastCaptureTime > CAPTURE_DELAY) {
-                lastCaptureTime = currentTime;
-                runOnUiThread(() -> resultText.setText("모션 감지 → 촬영 중..."));
-                capturePhoto();
-            }
-        }
-    }
-
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
-
-    @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
                 keyCode == KeyEvent.KEYCODE_ENTER) {
@@ -240,19 +269,6 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
             return true;
         }
         return super.onKeyDown(keyCode, event);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (accelerometer != null) sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
-        if (gyroscope != null) sensorManager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        sensorManager.unregisterListener(this);
     }
 
     private boolean allPermissionsGranted() {
