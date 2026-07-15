@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.util.Base64;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -52,6 +53,9 @@ public class MainActivity extends AppCompatActivity {
     private android.os.Handler scrollHandler;
     private Runnable scrollRunnable;
     private boolean scrollingDown = true;
+    private int scrollRoundCount = 0;       // 왕복 횟수 카운터
+    private static final int MAX_SCROLL_ROUNDS = 2; // 2왕복 후 움직임 감지 재시작
+
     private ImageCapture imageCapture;
     private Camera camera;
     private ProcessCameraProvider cameraProvider;
@@ -63,9 +67,10 @@ public class MainActivity extends AppCompatActivity {
     private static final double MOTION_THRESHOLD = 4.0; // 노이즈 무시 임계값
     private double lastFrameAvg = -1;
     private long stableStartTime = 0;
-    private boolean hadMotion = false;     // 한 번이라도 움직임이 있었는지
-    private boolean isStable = true;       // 현재 안정 상태인지
-    private boolean isAnalyzing = false;
+    private boolean hadMotion = false;
+    private boolean isStable = true;
+    private boolean isAnalyzing = false;    // 분석 중 플래그 (촬영 차단용)
+    private boolean isScrolling = false;    // 오토스크롤 중 플래그 (촬영 차단용)
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
@@ -96,7 +101,11 @@ public class MainActivity extends AppCompatActivity {
             }, PERMISSION_REQUEST_CODE);
         }
 
-        captureButton.setOnClickListener(v -> capturePhoto());
+        captureButton.setOnClickListener(v -> {
+            stopAutoScroll();
+            resetToNormalLayout();
+            capturePhoto();
+        });
     }
 
     private void startCamera() {
@@ -144,10 +153,11 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 카메라 프레임 밝기 평균을 비교하여 움직임 감지
-     * 시험지를 가져다 대면(움직임 발생) → 멈추면(2초 안정) → 자동 촬영
+     * 분석 중이거나 오토스크롤 중이면 감지 차단
      */
     private void analyzeFrame(ImageProxy image) {
-        if (isAnalyzing) return;
+        // 분석 중이거나 오토스크롤 중이면 촬영 차단
+        if (isAnalyzing || isScrolling) return;
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastCaptureTime < CAPTURE_DELAY) return;
 
@@ -251,6 +261,8 @@ public class MainActivity extends AppCompatActivity {
                     isAnalyzing = false;
                     if (response.isSuccessful()) {
                         resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
+                        // 오토스크롤 시작 전 레이아웃 변경 (결과 영역 50%)
+                        switchToScrollLayout();
                         startAutoScroll();
                     } else {
                         resultText.setText("API 오류: " + response.code());
@@ -265,18 +277,60 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    /** 오토스크롤 모드: 카메라 25% / 결과 75% */
+    private void switchToScrollLayout() {
+        isScrolling = true;
+        ViewGroup.LayoutParams previewParams = previewView.getLayoutParams();
+        if (previewParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) previewParams).weight = 25;
+            previewView.setLayoutParams(previewParams);
+        }
+        ViewGroup.LayoutParams scrollParams = resultScrollView.getLayoutParams();
+        if (scrollParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) scrollParams).weight = 75;
+            resultScrollView.setLayoutParams(scrollParams);
+        }
+    }
+
+    /** 일반 모드: 카메라 55% / 결과 45% */
+    private void resetToNormalLayout() {
+        isScrolling = false;
+        ViewGroup.LayoutParams previewParams = previewView.getLayoutParams();
+        if (previewParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) previewParams).weight = 55;
+            previewView.setLayoutParams(previewParams);
+        }
+        ViewGroup.LayoutParams scrollParams = resultScrollView.getLayoutParams();
+        if (scrollParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) scrollParams).weight = 45;
+            resultScrollView.setLayoutParams(scrollParams);
+        }
+        // 상태 초기화
+        hadMotion = false;
+        isStable = true;
+        lastFrameAvg = -1;
+        resultText.setText("준비 완료 — 시험지를 카메라 앞에 놓으세요");
+    }
+
     private void startAutoScroll() {
         stopAutoScroll();
         scrollingDown = true;
+        scrollRoundCount = 0;
         if (resultScrollView == null) return;
-        // 맨 위에서 시작
         resultScrollView.scrollTo(0, 0);
+
         scrollRunnable = new Runnable() {
             @Override
             public void run() {
                 if (resultScrollView == null) return;
                 int maxScroll = resultScrollView.getChildAt(0).getHeight() - resultScrollView.getHeight();
-                if (maxScroll <= 0) return; // 스크롤 불필요
+
+                // 스크롤 불필요 (텍스트가 짧음) → 바로 움직임 감지 재시작
+                if (maxScroll <= 0) {
+                    onScrollComplete();
+                    return;
+                }
+
                 int current = resultScrollView.getScrollY();
                 if (scrollingDown) {
                     if (current >= maxScroll) {
@@ -289,9 +343,16 @@ public class MainActivity extends AppCompatActivity {
                     }
                 } else {
                     if (current <= 0) {
-                        // 맨 위 도달 → 1.5초 멈춤 후 아래로
-                        scrollingDown = true;
-                        scrollHandler.postDelayed(this, 1500);
+                        // 맨 위 도달 → 왕복 1회 완료
+                        scrollRoundCount++;
+                        if (scrollRoundCount >= MAX_SCROLL_ROUNDS) {
+                            // 2왕복 완료 → 움직임 감지 재시작
+                            onScrollComplete();
+                        } else {
+                            // 아직 왕복 횟수 미달 → 계속 아래로
+                            scrollingDown = true;
+                            scrollHandler.postDelayed(this, 1500);
+                        }
                     } else {
                         resultScrollView.smoothScrollBy(0, -4);
                         scrollHandler.postDelayed(this, 30);
@@ -299,8 +360,14 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        // 1초 후 스크롤 시작 (텍스트 읽을 시간)
+        // 1초 후 스크롤 시작
         scrollHandler.postDelayed(scrollRunnable, 1000);
+    }
+
+    /** 2왕복 완료 후 호출 — 레이아웃 복원 및 움직임 감지 재시작 */
+    private void onScrollComplete() {
+        stopAutoScroll();
+        resetToNormalLayout();
     }
 
     private void stopAutoScroll() {
@@ -326,6 +393,8 @@ public class MainActivity extends AppCompatActivity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
                 keyCode == KeyEvent.KEYCODE_ENTER) {
+            stopAutoScroll();
+            resetToNormalLayout();
             capturePhoto();
             return true;
         }
