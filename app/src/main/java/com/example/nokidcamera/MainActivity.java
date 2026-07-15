@@ -49,6 +49,9 @@ public class MainActivity extends AppCompatActivity {
     private Button captureButton;
     private TextView resultText;
     private android.widget.ScrollView resultScrollView;
+    private android.os.Handler scrollHandler;
+    private Runnable scrollRunnable;
+    private boolean scrollingDown = true;
     private ImageCapture imageCapture;
     private Camera camera;
     private ProcessCameraProvider cameraProvider;
@@ -75,6 +78,7 @@ public class MainActivity extends AppCompatActivity {
         captureButton = findViewById(R.id.captureButton);
         resultText = findViewById(R.id.resultText);
         resultScrollView = findViewById(R.id.resultScrollView);
+        scrollHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
         // 무음 설정
         AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
@@ -247,12 +251,9 @@ public class MainActivity extends AppCompatActivity {
                     isAnalyzing = false;
                     if (response.isSuccessful()) {
                         resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
+                        startAutoScroll();
                     } else {
                         resultText.setText("API 오류: " + response.code());
-                    }
-                    // 매 위로 자동 스크롤
-                    if (resultScrollView != null) {
-                        resultScrollView.post(() -> resultScrollView.smoothScrollTo(0, 0));
                     }
                 });
             } catch (Exception e) {
@@ -262,6 +263,51 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         }).start();
+    }
+
+    private void startAutoScroll() {
+        stopAutoScroll();
+        scrollingDown = true;
+        if (resultScrollView == null) return;
+        // 맨 위에서 시작
+        resultScrollView.scrollTo(0, 0);
+        scrollRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (resultScrollView == null) return;
+                int maxScroll = resultScrollView.getChildAt(0).getHeight() - resultScrollView.getHeight();
+                if (maxScroll <= 0) return; // 스크롤 불필요
+                int current = resultScrollView.getScrollY();
+                if (scrollingDown) {
+                    if (current >= maxScroll) {
+                        // 맨 아래 도달 → 1.5초 멈춤 후 위로
+                        scrollingDown = false;
+                        scrollHandler.postDelayed(this, 1500);
+                    } else {
+                        resultScrollView.smoothScrollBy(0, 4);
+                        scrollHandler.postDelayed(this, 30);
+                    }
+                } else {
+                    if (current <= 0) {
+                        // 맨 위 도달 → 1.5초 멈춤 후 아래로
+                        scrollingDown = true;
+                        scrollHandler.postDelayed(this, 1500);
+                    } else {
+                        resultScrollView.smoothScrollBy(0, -4);
+                        scrollHandler.postDelayed(this, 30);
+                    }
+                }
+            }
+        };
+        // 1초 후 스크롤 시작 (텍스트 읽을 시간)
+        scrollHandler.postDelayed(scrollRunnable, 1000);
+    }
+
+    private void stopAutoScroll() {
+        if (scrollHandler != null && scrollRunnable != null) {
+            scrollHandler.removeCallbacks(scrollRunnable);
+            scrollRunnable = null;
+        }
     }
 
     private String extractAnswer(String jsonResponse) {
