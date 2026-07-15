@@ -161,7 +161,7 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
 
                 OkHttpClient client = new OkHttpClient();
                 Request request = new Request.Builder()
-                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + GEMINI_API_KEY)
+                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=" + GEMINI_API_KEY)
                         .post(RequestBody.create(jsonBody, MediaType.parse("application/json")))
                         .build();
 
