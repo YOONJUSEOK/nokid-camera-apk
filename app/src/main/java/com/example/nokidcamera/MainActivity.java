@@ -55,8 +55,9 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
     private Sensor gyroscope;
     private float[] lastAccel = new float[3];
     private float[] lastGyro = new float[3];
+    private float[] gravity = new float[]{0f, 0f, 9.8f};
     private long lastCaptureTime = 0;
-    private static final long CAPTURE_DELAY = 1500;
+    private static final long CAPTURE_DELAY = 2000;
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
     @Override
@@ -213,24 +214,31 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
     }
 
     @Override
-    public void onSensorChanged(SensorEvent event) {
+        public void onSensorChanged(SensorEvent event) {
         long currentTime = System.currentTimeMillis();
-        if (currentTime - lastCaptureTime < CAPTURE_DELAY) return;
-
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-            lastAccel = event.values.clone();
-            float accelMagnitude = (float) Math.sqrt(lastAccel[0] * lastAccel[0] +
-                    lastAccel[1] * lastAccel[1] + lastAccel[2] * lastAccel[2]);
-            if (accelMagnitude > 25) {
+            // 저역통과 필터로 중력 성분 추출
+            final float alpha = 0.8f;
+            gravity[0] = alpha * gravity[0] + (1 - alpha) * event.values[0];
+            gravity[1] = alpha * gravity[1] + (1 - alpha) * event.values[1];
+            gravity[2] = alpha * gravity[2] + (1 - alpha) * event.values[2];
+            // 중력 제거 후 순수 움직임
+            float ax = event.values[0] - gravity[0];
+            float ay = event.values[1] - gravity[1];
+            float az = event.values[2] - gravity[2];
+            float linearAccel = (float) Math.sqrt(ax * ax + ay * ay + az * az);
+            if (linearAccel > 3.0f && currentTime - lastCaptureTime > CAPTURE_DELAY) {
                 lastCaptureTime = currentTime;
+                runOnUiThread(() -> resultText.setText("모션 감지 → 촬영 중..."));
                 capturePhoto();
             }
         } else if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
             lastGyro = event.values.clone();
             float gyroMagnitude = (float) Math.sqrt(lastGyro[0] * lastGyro[0] +
                     lastGyro[1] * lastGyro[1] + lastGyro[2] * lastGyro[2]);
-            if (gyroMagnitude > 5) {
+            if (gyroMagnitude > 2.0f && currentTime - lastCaptureTime > CAPTURE_DELAY) {
                 lastCaptureTime = currentTime;
+                runOnUiThread(() -> resultText.setText("모션 감지 → 촬영 중..."));
                 capturePhoto();
             }
         }
