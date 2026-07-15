@@ -48,6 +48,7 @@ public class MainActivity extends AppCompatActivity {
     private PreviewView previewView;
     private Button captureButton;
     private TextView resultText;
+    private android.widget.ScrollView resultScrollView;
     private ImageCapture imageCapture;
     private Camera camera;
     private ProcessCameraProvider cameraProvider;
@@ -73,6 +74,7 @@ public class MainActivity extends AppCompatActivity {
         previewView = findViewById(R.id.previewView);
         captureButton = findViewById(R.id.captureButton);
         resultText = findViewById(R.id.resultText);
+        resultScrollView = findViewById(R.id.resultScrollView);
 
         // 무음 설정
         AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
@@ -247,6 +249,10 @@ public class MainActivity extends AppCompatActivity {
                         resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
                     } else {
                         resultText.setText("API 오류: " + response.code());
+                    }
+                    // 매 위로 자동 스크롤
+                    if (resultScrollView != null) {
+                        resultScrollView.post(() -> resultScrollView.smoothScrollTo(0, 0));
                     }
                 });
             } catch (Exception e) {
