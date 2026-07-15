@@ -161,7 +161,7 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
 
                 OkHttpClient client = new OkHttpClient();
                 Request request = new Request.Builder()
-                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + GEMINI_API_KEY)
+                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + GEMINI_API_KEY)
                         .post(RequestBody.create(jsonBody, MediaType.parse("application/json")))
                         .build();
 
@@ -183,11 +183,28 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
 
     private String extractAnswer(String jsonResponse) {
         try {
-            int startIdx = jsonResponse.indexOf("\"text\": \"") + 9;
-            int endIdx = jsonResponse.indexOf("\"", startIdx);
-            return jsonResponse.substring(startIdx, endIdx).replace("\\n", "\n");
+            // candidates[0].content.parts[0].text 파싱
+            String marker = "\"text\": \"";
+            int startIdx = jsonResponse.indexOf(marker);
+            if (startIdx == -1) return "응답 없음: " + jsonResponse.substring(0, Math.min(200, jsonResponse.length()));
+            startIdx += marker.length();
+            StringBuilder sb = new StringBuilder();
+            int i = startIdx;
+            while (i < jsonResponse.length()) {
+                char c = jsonResponse.charAt(i);
+                if (c == '\\' && i + 1 < jsonResponse.length()) {
+                    char next = jsonResponse.charAt(i + 1);
+                    if (next == 'n') { sb.append('\n'); i += 2; continue; }
+                    if (next == '"') { sb.append('"'); i += 2; continue; }
+                    if (next == '\\') { sb.append('\\'); i += 2; continue; }
+                }
+                if (c == '"') break;
+                sb.append(c);
+                i++;
+            }
+            return sb.toString();
         } catch (Exception e) {
-            return "응답 파싱 오류";
+            return "응답 파싱 오류: " + e.getMessage();
         }
     }
 
