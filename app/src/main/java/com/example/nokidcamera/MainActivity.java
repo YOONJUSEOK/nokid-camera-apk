@@ -103,6 +103,8 @@ public class MainActivity extends AppCompatActivity {
 
         captureButton.setOnClickListener(v -> {
             stopAutoScroll();
+            isAnalyzing = false;  // 강제 초기화
+            isScrolling = false;
             resetToNormalLayout();
             capturePhoto();
         });
@@ -392,8 +394,15 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
-                keyCode == KeyEvent.KEYCODE_ENTER) {
+                keyCode == KeyEvent.KEYCODE_ENTER ||
+                keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
+                keyCode == KeyEvent.KEYCODE_BUTTON_A ||
+                keyCode == KeyEvent.KEYCODE_SPACE) {
             stopAutoScroll();
+            isAnalyzing = false;  // 강제 초기화
+            isScrolling = false;
             resetToNormalLayout();
             capturePhoto();
             return true;
