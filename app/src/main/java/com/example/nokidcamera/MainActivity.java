@@ -19,7 +19,6 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.Camera;
-import androidx.camera.core.CameraProvider;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
@@ -50,7 +49,7 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
     private TextView resultText;
     private ImageCapture imageCapture;
     private Camera camera;
-    private CameraProvider cameraProvider;
+    private ProcessCameraProvider cameraProvider;
     private SensorManager sensorManager;
     private Sensor accelerometer;
     private Sensor gyroscope;
@@ -58,7 +57,7 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
     private float[] lastGyro = new float[3];
     private long lastCaptureTime = 0;
     private static final long CAPTURE_DELAY = 1500;
-    private static final String GEMINI_API_KEY = "AQ.Ab8RN6J2KkRK2-YuQo7vX5VWAfY-o9FNLZwSboRLAdeql2Ps8g";
+    private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
