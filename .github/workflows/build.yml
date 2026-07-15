@@ -60,19 +60,66 @@ jobs:
       
         GRADLE_OPTS: "-Xmx4096m"
         
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        
 
 
-    - name: Upload APK as Artifact
+    - name: Sign APK
+    
+      run: |
+      
+        UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+        
+        keytool -genkey -v -keystore nokid-keystore.jks \
+        
+          -alias nokid-key -keyalg RSA -keysize 2048 -validity 10000 \
+          
+          -dname "CN=Nokid, OU=Dev, O=Nokid, L=Seoul, S=Seoul, C=KR" \
+          
+          -storepass nokid1234 -keypass nokid1234
+          
+        zipalign -v 4 "$UNSIGNED_APK" app-release-aligned.apk
+        
+        apksigner sign --ks nokid-keystore.jks \
+        
+          --ks-key-alias nokid-key \
+          
+          --ks-pass pass:nokid1234 \
+          
+          --key-pass pass:nokid1234 \
+          
+          --out app-release-signed.apk \
+          
+          app-release-aligned.apk
+          
+
+
+    - name: Upload Signed APK as Artifact
     
       uses: actions/upload-artifact@v4
       
       with:
       
-        name: app-release
+        name: app-release-signed
         
-        path: app/build/outputs/apk/**/*.apk
+        path: app-release-signed.apk
         
         retention-days: 30
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
