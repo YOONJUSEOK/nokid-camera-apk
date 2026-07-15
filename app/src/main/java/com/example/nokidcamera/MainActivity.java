@@ -10,7 +10,6 @@ import android.util.Base64;
 import android.view.KeyEvent;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -48,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
     private PreviewView previewView;
     private Button captureButton;
     private TextView resultText;
-    private ScrollView resultScrollView;
     private ImageCapture imageCapture;
     private Camera camera;
     private ProcessCameraProvider cameraProvider;
@@ -62,12 +60,13 @@ public class MainActivity extends AppCompatActivity {
     private boolean motionDetected = false;
     private boolean isAnalyzing = false;
 
-    // 오토스크롤 변수
+    // 오토스크롤 변수 (TextView 자체 스크롤)
     private Handler scrollHandler = new Handler(Looper.getMainLooper());
     private Runnable scrollRunnable;
     private boolean isScrolling = false;
     private boolean scrollingDown = true;
     private int scrollRoundCount = 0;
+    private int scrollY = 0;
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
@@ -79,7 +78,9 @@ public class MainActivity extends AppCompatActivity {
         previewView = findViewById(R.id.previewView);
         captureButton = findViewById(R.id.captureButton);
         resultText = findViewById(R.id.resultText);
-        resultScrollView = findViewById(R.id.resultScrollView);
+
+        // TextView 스크롤 활성화
+        resultText.setMovementMethod(new android.text.method.ScrollingMovementMethod());
 
         // 무음 설정
         AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
@@ -244,8 +245,8 @@ public class MainActivity extends AppCompatActivity {
                     isAnalyzing = false;
                     if (response.isSuccessful()) {
                         resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
-                        expandResultArea();   // 자막창 확대
-                        startAutoScroll();    // 오토스크롤 시작
+                        expandResultArea();
+                        startAutoScroll();
                     } else {
                         resultText.setText("API 오류: " + response.code());
                     }
@@ -259,57 +260,63 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // ─── 자막창 크기 조절 (ScrollView height만 변경, weight 미사용) ───
+    // ─── 자막창 크기 조절 (TextView height만 변경) ───
 
-    /** 촬영 대기: 자막창 100dp (작게) */
     private void shrinkResultArea() {
-        if (resultScrollView == null) return;
-        ViewGroup.LayoutParams params = resultScrollView.getLayoutParams();
+        ViewGroup.LayoutParams params = resultText.getLayoutParams();
         params.height = (int) (100 * getResources().getDisplayMetrics().density);
-        resultScrollView.setLayoutParams(params);
+        resultText.setLayoutParams(params);
+        resultText.scrollTo(0, 0);
+        scrollY = 0;
     }
 
-    /** 분석 완료: 자막창 화면의 50% */
     private void expandResultArea() {
-        if (resultScrollView == null) return;
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
-        ViewGroup.LayoutParams params = resultScrollView.getLayoutParams();
+        ViewGroup.LayoutParams params = resultText.getLayoutParams();
         params.height = screenHeight / 2;
-        resultScrollView.setLayoutParams(params);
+        resultText.setLayoutParams(params);
+        resultText.scrollTo(0, 0);
+        scrollY = 0;
     }
 
-    // ─── 오토스크롤 ───
+    // ─── 오토스크롤 (TextView.scrollTo 방식) ───
 
     private void startAutoScroll() {
         stopAutoScroll();
         isScrolling = true;
         scrollingDown = true;
         scrollRoundCount = 0;
-        if (resultScrollView == null) return;
-        resultScrollView.scrollTo(0, 0);
+        scrollY = 0;
 
         scrollRunnable = new Runnable() {
             @Override
             public void run() {
-                if (resultScrollView == null) return;
-                int maxScroll = resultScrollView.getChildAt(0).getHeight() - resultScrollView.getHeight();
+                // 스크롤 가능한 최대값 계산
+                int textHeight = resultText.getLineCount() * resultText.getLineHeight();
+                int viewHeight = resultText.getHeight();
+                int maxScroll = Math.max(0, textHeight - viewHeight);
+
                 if (maxScroll <= 0) {
                     onScrollComplete();
                     return;
                 }
-                int current = resultScrollView.getScrollY();
-                int step = 6;
 
                 if (scrollingDown) {
-                    if (current >= maxScroll) {
+                    scrollY += 6;
+                    if (scrollY >= maxScroll) {
+                        scrollY = maxScroll;
+                        resultText.scrollTo(0, scrollY);
                         scrollingDown = false;
                         scrollHandler.postDelayed(this, 1500);
                     } else {
-                        resultScrollView.scrollBy(0, step);
+                        resultText.scrollTo(0, scrollY);
                         scrollHandler.postDelayed(this, 30);
                     }
                 } else {
-                    if (current <= 0) {
+                    scrollY -= 6;
+                    if (scrollY <= 0) {
+                        scrollY = 0;
+                        resultText.scrollTo(0, scrollY);
                         scrollRoundCount++;
                         if (scrollRoundCount >= 2) {
                             onScrollComplete();
@@ -318,7 +325,7 @@ public class MainActivity extends AppCompatActivity {
                             scrollHandler.postDelayed(this, 1500);
                         }
                     } else {
-                        resultScrollView.scrollBy(0, -step);
+                        resultText.scrollTo(0, scrollY);
                         scrollHandler.postDelayed(this, 30);
                     }
                 }
@@ -334,7 +341,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 2왕복 완료 → 자막창 축소 + 다음 촬영 대기 */
     private void onScrollComplete() {
         isScrolling = false;
         motionDetected = false;

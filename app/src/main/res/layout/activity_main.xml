@@ -20,23 +20,15 @@
         android:background="#667eea"
         android:textColor="#ffffff" />
 
-    <ScrollView
-        android:id="@+id/resultScrollView"
+    <TextView
+        android:id="@+id/resultText"
         android:layout_width="match_parent"
         android:layout_height="100dp"
+        android:text="준비 중..."
+        android:textColor="#ffffff"
+        android:textSize="14sp"
+        android:padding="12dp"
         android:background="#1a1a1a"
-        android:fillViewport="true">
-
-        <TextView
-            android:id="@+id/resultText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="준비 중..."
-            android:textColor="#ffffff"
-            android:textSize="14sp"
-            android:padding="12dp"
-            android:lineSpacingMultiplier="1.4" />
-
-    </ScrollView>
+        android:scrollbars="vertical" />
 
 </LinearLayout>
