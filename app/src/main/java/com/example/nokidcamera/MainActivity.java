@@ -261,8 +261,6 @@ public class MainActivity extends AppCompatActivity {
                     isAnalyzing = false;
                     if (response.isSuccessful()) {
                         resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
-                        // 오토스크롤 시작 전 레이아웃 변경 (결과 영역 50%)
-                        switchToScrollLayout();
                         startAutoScroll();
                     } else {
                         resultText.setText("API 오류: " + response.code());
@@ -277,34 +275,9 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** 오토스크롤 모드: 카메라 25% / 결과 75% */
-    private void switchToScrollLayout() {
-        isScrolling = true;
-        ViewGroup.LayoutParams previewParams = previewView.getLayoutParams();
-        if (previewParams instanceof android.widget.LinearLayout.LayoutParams) {
-            ((android.widget.LinearLayout.LayoutParams) previewParams).weight = 25;
-            previewView.setLayoutParams(previewParams);
-        }
-        ViewGroup.LayoutParams scrollParams = resultScrollView.getLayoutParams();
-        if (scrollParams instanceof android.widget.LinearLayout.LayoutParams) {
-            ((android.widget.LinearLayout.LayoutParams) scrollParams).weight = 75;
-            resultScrollView.setLayoutParams(scrollParams);
-        }
-    }
-
-    /** 일반 모드: 카메라 55% / 결과 45% */
+    /** 오토스크롤 시작 시 isScrolling 플래그만 설정 (레이아웃 바꾸지 않음) */
     private void resetToNormalLayout() {
         isScrolling = false;
-        ViewGroup.LayoutParams previewParams = previewView.getLayoutParams();
-        if (previewParams instanceof android.widget.LinearLayout.LayoutParams) {
-            ((android.widget.LinearLayout.LayoutParams) previewParams).weight = 55;
-            previewView.setLayoutParams(previewParams);
-        }
-        ViewGroup.LayoutParams scrollParams = resultScrollView.getLayoutParams();
-        if (scrollParams instanceof android.widget.LinearLayout.LayoutParams) {
-            ((android.widget.LinearLayout.LayoutParams) scrollParams).weight = 45;
-            resultScrollView.setLayoutParams(scrollParams);
-        }
         // 상태 초기화
         hadMotion = false;
         isStable = true;
@@ -314,6 +287,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void startAutoScroll() {
         stopAutoScroll();
+        isScrolling = true;
         scrollingDown = true;
         scrollRoundCount = 0;
         if (resultScrollView == null) return;
