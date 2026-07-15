@@ -261,6 +261,7 @@ public class MainActivity extends AppCompatActivity {
                     isAnalyzing = false;
                     if (response.isSuccessful()) {
                         resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
+                        switchToResultLayout(); // 자막상 확대
                         startAutoScroll();
                     } else {
                         resultText.setText("API 오류: " + response.code());
@@ -275,9 +276,34 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    /** 오토스크롤 시작 시 isScrolling 플래그만 설정 (레이아웃 바꾸지 않음) */
+    /** 분석 완료 후: 카메라 25% / 자막 75% */
+    private void switchToResultLayout() {
+        ViewGroup.LayoutParams previewParams = previewView.getLayoutParams();
+        if (previewParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) previewParams).weight = 25;
+            previewView.setLayoutParams(previewParams);
+        }
+        ViewGroup.LayoutParams scrollParams = resultScrollView.getLayoutParams();
+        if (scrollParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) scrollParams).weight = 75;
+            resultScrollView.setLayoutParams(scrollParams);
+        }
+    }
+
+    /** 촬영 대기 모드: 카메라 80% / 자막 20% */
     private void resetToNormalLayout() {
         isScrolling = false;
+        // 레이아웃 복원
+        ViewGroup.LayoutParams previewParams = previewView.getLayoutParams();
+        if (previewParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) previewParams).weight = 80;
+            previewView.setLayoutParams(previewParams);
+        }
+        ViewGroup.LayoutParams scrollParams = resultScrollView.getLayoutParams();
+        if (scrollParams instanceof android.widget.LinearLayout.LayoutParams) {
+            ((android.widget.LinearLayout.LayoutParams) scrollParams).weight = 20;
+            resultScrollView.setLayoutParams(scrollParams);
+        }
         // 상태 초기화
         hadMotion = false;
         isStable = true;

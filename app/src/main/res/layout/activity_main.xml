@@ -9,7 +9,7 @@
         android:id="@+id/previewView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="55" />
+        android:layout_weight="80" />
 
     <Button
         android:id="@+id/captureButton"
@@ -24,7 +24,7 @@
         android:id="@+id/resultScrollView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="45"
+        android:layout_weight="20"
         android:background="#1a1a1a"
         android:fillViewport="true">
 
