@@ -57,7 +57,7 @@ public class MainActivity extends AppCompatActivity implements android.hardware.
     private float[] lastGyro = new float[3];
     private long lastCaptureTime = 0;
     private static final long CAPTURE_DELAY = 1500;
-    private static final String GEMINI_API_KEY = "AQ.Ab8RN6J2KkRK2-YuQo7vX5VWAfY-o9FNLZwSboRLAdeql2Ps8g";
+    private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
