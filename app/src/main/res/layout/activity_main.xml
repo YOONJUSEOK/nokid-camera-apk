@@ -9,7 +9,7 @@
         android:id="@+id/previewView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="55" />
 
     <Button
         android:id="@+id/captureButton"
@@ -20,15 +20,22 @@
         android:background="#667eea"
         android:textColor="#ffffff" />
 
-    <TextView
-        android:id="@+id/resultText"
+    <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="100dp"
-        android:text="준비 중..."
-        android:textColor="#ffffff"
-        android:textSize="14sp"
-        android:padding="12dp"
+        android:layout_height="0dp"
+        android:layout_weight="45"
         android:background="#1a1a1a"
-        android:scrollbars="vertical" />
+        android:fillViewport="true">
+
+        <TextView
+            android:id="@+id/resultText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="준비 중..."
+            android:textColor="#ffffff"
+            android:textSize="14sp"
+            android:lineSpacingMultiplier="1.4"
+            android:padding="12dp" />
+    </ScrollView>
 
 </LinearLayout>
