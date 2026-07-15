@@ -54,11 +54,13 @@ public class MainActivity extends AppCompatActivity {
 
     // 카메라 프레임 모션 감지 변수
     private long lastCaptureTime = 0;
-    private static final long CAPTURE_DELAY = 3000; // 촬영 후 3초 쿨다운
-    private static final long STABLE_DURATION = 1500; // 1.5초 안정 후 촬영
+    private static final long CAPTURE_DELAY = 4000;   // 촬영 후 4초 쿨다운
+    private static final long STABLE_DURATION = 2000; // 2초 안정 후 촬영
+    private static final double MOTION_THRESHOLD = 4.0; // 노이즈 무시 임계값
     private double lastFrameAvg = -1;
-    private long motionStartTime = 0;
-    private boolean motionDetected = false;
+    private long stableStartTime = 0;
+    private boolean hadMotion = false;     // 한 번이라도 움직임이 있었는지
+    private boolean isStable = true;       // 현재 안정 상태인지
     private boolean isAnalyzing = false;
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
@@ -136,17 +138,16 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 카메라 프레임 밝기 평균을 비교하여 움직임 감지
-     * 움직임이 멈추고 1.5초 안정되면 자동 촬영
+     * 시험지를 가져다 대면(움직임 발생) → 멈추면(2초 안정) → 자동 촬영
      */
     private void analyzeFrame(ImageProxy image) {
         if (isAnalyzing) return;
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastCaptureTime < CAPTURE_DELAY) return;
 
-        // Y 채널(밝기)에서 평균값 계산
+        // Y 채널(밝기)에서 평균값 계산 (1/16 샘플링)
         ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
         int ySize = yBuffer.remaining();
-        // 성능을 위해 전체 픽셀의 1/16만 샘플링
         long sum = 0;
         int count = 0;
         for (int i = 0; i < ySize; i += 16) {
@@ -157,25 +158,33 @@ public class MainActivity extends AppCompatActivity {
 
         if (lastFrameAvg < 0) {
             lastFrameAvg = currentAvg;
+            stableStartTime = currentTime;
             return;
         }
 
         double diff = Math.abs(currentAvg - lastFrameAvg);
         lastFrameAvg = currentAvg;
 
-        // 변화 감지 임계값: 밝기 평균 차이 1.5 이상 = 움직임
-        if (diff > 1.5) {
-            motionDetected = true;
-            motionStartTime = currentTime;
-            runOnUiThread(() -> resultText.setText("움직임 감지 중... (멈추면 촬영)"));
+        if (diff > MOTION_THRESHOLD) {
+            // 움직임 감지 → 안정 타이머 리셋
+            hadMotion = true;
+            isStable = false;
+            stableStartTime = currentTime;
+            runOnUiThread(() -> resultText.setText("움직임 감지 ✓ — 멈추면 자동 촬영"));
         } else {
-            // 움직임이 있었고, 1.5초 이상 안정된 경우 촬영
-            if (motionDetected && (currentTime - motionStartTime) > STABLE_DURATION) {
-                motionDetected = false;
+            // 안정 상태
+            if (!isStable) {
+                isStable = true;
+                stableStartTime = currentTime;
+            }
+            // 움직임이 있었고, 2초 이상 안정된 경우 촬영
+            if (hadMotion && (currentTime - stableStartTime) > STABLE_DURATION) {
+                hadMotion = false;
+                isStable = true;
                 lastCaptureTime = currentTime;
                 isAnalyzing = true;
                 runOnUiThread(() -> {
-                    resultText.setText("📸 안정 감지 → 촬영 중...");
+                    resultText.setText("📸 촬영 중...");
                     capturePhoto();
                 });
             }
