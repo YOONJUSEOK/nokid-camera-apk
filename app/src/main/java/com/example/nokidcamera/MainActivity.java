@@ -8,7 +8,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Base64;
 import android.view.KeyEvent;
-import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -118,10 +117,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             cameraProvider.unbindAll();
             camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
-            runOnUiThread(() -> {
-                shrinkResult();
-                resultText.setText("준비 완료 — 촬영 버튼을 누르세요");
-            });
+            runOnUiThread(() -> resultText.setText("준비 완료 — 촬영 버튼을 누르세요"));
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -184,8 +180,8 @@ public class MainActivity extends AppCompatActivity {
                     if (response.isSuccessful()) {
                         String answer = extractAnswer(responseBody);
                         resultText.setText("✓ 분석 완료:\n" + answer);
-                        expandResult();      // 자막창 확대
-                        startAutoScroll();   // 오토스크롤 시작
+                        resultText.scrollTo(0, 0);
+                        startAutoScroll();
                     } else {
                         resultText.setText("API 오류: " + response.code());
                     }
@@ -199,32 +195,7 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-    // ─── 자막창 크기 (TextView height만 변경) ───
-
-    /** 촬영 대기: 자막창 100dp */
-    private void shrinkResult() {
-        ViewGroup.LayoutParams p = resultText.getLayoutParams();
-        p.height = dp(100);
-        resultText.setLayoutParams(p);
-        resultText.scrollTo(0, 0);
-        scrollY = 0;
-    }
-
-    /** 분석 완료: 자막창 화면 50% */
-    private void expandResult() {
-        int half = getResources().getDisplayMetrics().heightPixels / 2;
-        ViewGroup.LayoutParams p = resultText.getLayoutParams();
-        p.height = half;
-        resultText.setLayoutParams(p);
-        resultText.scrollTo(0, 0);
-        scrollY = 0;
-    }
-
-    private int dp(int dp) {
-        return (int) (dp * getResources().getDisplayMetrics().density);
-    }
-
-    // ─── 오토스크롤 (TextView.scrollTo 방식) ───
+    // ─── 오토스크롤 (TextView.scrollTo 방식, 레이아웃 변경 없음) ───
 
     private void startAutoScroll() {
         stopAutoScroll();
@@ -241,7 +212,6 @@ public class MainActivity extends AppCompatActivity {
                 int maxScroll = Math.max(0, lineHeight * lineCount - viewHeight);
 
                 if (maxScroll <= 0) {
-                    // 텍스트가 짧아 스크롤 불필요 → 바로 종료
                     onScrollDone();
                     return;
                 }
@@ -252,7 +222,7 @@ public class MainActivity extends AppCompatActivity {
                         scrollY = maxScroll;
                         resultText.scrollTo(0, scrollY);
                         scrollingDown = false;
-                        scrollHandler.postDelayed(this, 1500); // 하단 1.5초 멈춤
+                        scrollHandler.postDelayed(this, 1500);
                     } else {
                         resultText.scrollTo(0, scrollY);
                         scrollHandler.postDelayed(this, 30);
@@ -264,10 +234,10 @@ public class MainActivity extends AppCompatActivity {
                         resultText.scrollTo(0, scrollY);
                         scrollRoundCount++;
                         if (scrollRoundCount >= 2) {
-                            onScrollDone(); // 2왕복 완료
+                            onScrollDone();
                         } else {
                             scrollingDown = true;
-                            scrollHandler.postDelayed(this, 1500); // 상단 1.5초 멈춤
+                            scrollHandler.postDelayed(this, 1500);
                         }
                     } else {
                         resultText.scrollTo(0, scrollY);
@@ -276,7 +246,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        scrollHandler.postDelayed(scrollRunnable, 1000); // 1초 후 시작
+        scrollHandler.postDelayed(scrollRunnable, 1000);
     }
 
     private void stopAutoScroll() {
@@ -286,10 +256,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** 2왕복 완료 → 자막 축소 + 대기 상태 */
     private void onScrollDone() {
         runOnUiThread(() -> {
-            shrinkResult();
+            resultText.scrollTo(0, 0);
             resultText.setText("준비 완료 — 촬영 버튼을 누르세요");
         });
     }
@@ -304,7 +273,7 @@ public class MainActivity extends AppCompatActivity {
             org.json.JSONArray parts = content.getJSONArray("parts");
             return parts.getJSONObject(0).getString("text");
         } catch (Exception e) {
-            return "파싱 오류: " + e.getMessage() + "\n원본: " + jsonResponse.substring(0, Math.min(300, jsonResponse.length()));
+            return "파싱 오류: " + e.getMessage();
         }
     }
 
@@ -317,7 +286,6 @@ public class MainActivity extends AppCompatActivity {
                 keyCode == KeyEvent.KEYCODE_SPACE) {
             stopAutoScroll();
             isAnalyzing = false;
-            shrinkResult();
             capturePhoto();
             return true;
         }

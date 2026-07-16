@@ -9,7 +9,7 @@
         android:id="@+id/previewView"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="6" />
 
     <Button
         android:id="@+id/captureButton"
@@ -23,7 +23,8 @@
     <TextView
         android:id="@+id/resultText"
         android:layout_width="match_parent"
-        android:layout_height="100dp"
+        android:layout_height="0dp"
+        android:layout_weight="4"
         android:text="준비 중..."
         android:textColor="#ffffff"
         android:textSize="14sp"
