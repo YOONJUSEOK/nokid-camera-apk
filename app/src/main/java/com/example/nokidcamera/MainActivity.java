@@ -2,8 +2,6 @@ package com.example.nokidcamera;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.media.AudioManager;
 import android.os.Bundle;
 import android.util.Base64;
@@ -16,10 +14,8 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
-import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageCapture;
 import androidx.camera.core.ImageCaptureException;
-import androidx.camera.core.ImageProxy;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
@@ -28,12 +24,9 @@ import androidx.core.content.ContextCompat;
 
 import com.google.common.util.concurrent.ListenableFuture;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -52,13 +45,6 @@ public class MainActivity extends AppCompatActivity {
     private Camera camera;
     private ProcessCameraProvider cameraProvider;
 
-    // 카메라 프레임 모션 감지 변수
-    private long lastCaptureTime = 0;
-    private static final long CAPTURE_DELAY = 3000; // 촬영 후 3초 쿨다운
-    private static final long STABLE_DURATION = 1500; // 1.5초 안정 후 촬영
-    private double lastFrameAvg = -1;
-    private long motionStartTime = 0;
-    private boolean motionDetected = false;
     private boolean isAnalyzing = false;
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
@@ -78,7 +64,6 @@ public class MainActivity extends AppCompatActivity {
             audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0);
         }
 
-        // 권한 확인
         if (allPermissionsGranted()) {
             startCamera();
         } else {
@@ -111,79 +96,22 @@ public class MainActivity extends AppCompatActivity {
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .build();
 
-        // 카메라 프레임 분석기 설정
-        ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build();
-
-        imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor(), image -> {
-            analyzeFrame(image);
-            image.close();
-        });
-
         CameraSelector cameraSelector = new CameraSelector.Builder()
                 .requireLensFacing(CameraSelector.LENS_FACING_BACK)
                 .build();
 
         try {
             cameraProvider.unbindAll();
-            camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture, imageAnalysis);
-            runOnUiThread(() -> resultText.setText("준비 완료 — 시험지를 카메라 앞에 놓으세요"));
+            camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
+            runOnUiThread(() -> resultText.setText("준비 완료 — 촬영 버튼을 누르세요"));
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    /**
-     * 카메라 프레임 밝기 평균을 비교하여 움직임 감지
-     * 움직임이 멈추고 1.5초 안정되면 자동 촬영
-     */
-    private void analyzeFrame(ImageProxy image) {
-        if (isAnalyzing) return;
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastCaptureTime < CAPTURE_DELAY) return;
-
-        // Y 채널(밝기)에서 평균값 계산
-        ByteBuffer yBuffer = image.getPlanes()[0].getBuffer();
-        int ySize = yBuffer.remaining();
-        // 성능을 위해 전체 픽셀의 1/16만 샘플링
-        long sum = 0;
-        int count = 0;
-        for (int i = 0; i < ySize; i += 16) {
-            sum += (yBuffer.get(i) & 0xFF);
-            count++;
-        }
-        double currentAvg = (count > 0) ? (double) sum / count : 0;
-
-        if (lastFrameAvg < 0) {
-            lastFrameAvg = currentAvg;
-            return;
-        }
-
-        double diff = Math.abs(currentAvg - lastFrameAvg);
-        lastFrameAvg = currentAvg;
-
-        // 변화 감지 임계값: 밝기 평균 차이 1.5 이상 = 움직임
-        if (diff > 1.5) {
-            motionDetected = true;
-            motionStartTime = currentTime;
-            runOnUiThread(() -> resultText.setText("움직임 감지 중... (멈추면 촬영)"));
-        } else {
-            // 움직임이 있었고, 1.5초 이상 안정된 경우 촬영
-            if (motionDetected && (currentTime - motionStartTime) > STABLE_DURATION) {
-                motionDetected = false;
-                lastCaptureTime = currentTime;
-                isAnalyzing = true;
-                runOnUiThread(() -> {
-                    resultText.setText("📸 안정 감지 → 촬영 중...");
-                    capturePhoto();
-                });
-            }
-        }
-    }
-
     private void capturePhoto() {
-        if (imageCapture == null) return;
+        if (imageCapture == null || isAnalyzing) return;
+        isAnalyzing = true;
 
         File outputFile = new File(getCacheDir(), "photo.jpg");
         ImageCapture.OutputFileOptions options = new ImageCapture.OutputFileOptions.Builder(outputFile).build();
@@ -264,7 +192,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
-                keyCode == KeyEvent.KEYCODE_ENTER) {
+                keyCode == KeyEvent.KEYCODE_ENTER ||
+                keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                keyCode == KeyEvent.KEYCODE_BUTTON_A ||
+                keyCode == KeyEvent.KEYCODE_SPACE) {
             capturePhoto();
             return true;
         }
