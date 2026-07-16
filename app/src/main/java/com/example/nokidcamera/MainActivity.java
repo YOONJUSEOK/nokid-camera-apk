@@ -206,10 +206,16 @@ public class MainActivity extends AppCompatActivity {
         scrollRunnable = new Runnable() {
             @Override
             public void run() {
-                int lineHeight = resultText.getLineHeight();
-                int lineCount = resultText.getLineCount();
-                int viewHeight = resultText.getHeight();
-                int maxScroll = Math.max(0, lineHeight * lineCount - viewHeight);
+                android.text.Layout layout = resultText.getLayout();
+                if (layout == null) {
+                    scrollHandler.postDelayed(this, 100);
+                    return;
+                }
+                int textHeight = layout.getHeight();
+                int viewHeight = resultText.getHeight()
+                        - resultText.getPaddingTop()
+                        - resultText.getPaddingBottom();
+                int maxScroll = Math.max(0, textHeight - viewHeight);
 
                 if (maxScroll <= 0) {
                     onScrollDone();
