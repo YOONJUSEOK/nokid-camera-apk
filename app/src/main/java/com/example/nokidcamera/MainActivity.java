@@ -4,9 +4,11 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.media.AudioManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
-import android.util.Log;
 import android.view.KeyEvent;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
@@ -36,7 +38,6 @@ import okhttp3.Response;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
-    private static final String TAG = "NokidCamera";
 
     private PreviewView previewView;
     private Button captureButton;
@@ -46,6 +47,13 @@ public class MainActivity extends AppCompatActivity {
     private ProcessCameraProvider cameraProvider;
 
     private boolean isAnalyzing = false;
+
+    // 오토스크롤
+    private final Handler scrollHandler = new Handler(Looper.getMainLooper());
+    private Runnable scrollRunnable;
+    private boolean scrollingDown = true;
+    private int scrollRoundCount = 0;
+    private int scrollY = 0;
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
@@ -57,6 +65,9 @@ public class MainActivity extends AppCompatActivity {
         previewView = findViewById(R.id.previewView);
         captureButton = findViewById(R.id.captureButton);
         resultText = findViewById(R.id.resultText);
+
+        // TextView 스크롤 활성화
+        resultText.setMovementMethod(new android.text.method.ScrollingMovementMethod());
 
         // 무음 설정
         AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
@@ -73,7 +84,11 @@ public class MainActivity extends AppCompatActivity {
             }, PERMISSION_REQUEST_CODE);
         }
 
-        captureButton.setOnClickListener(v -> capturePhoto());
+        captureButton.setOnClickListener(v -> {
+            stopAutoScroll();
+            isAnalyzing = false;
+            capturePhoto();
+        });
     }
 
     private void startCamera() {
@@ -103,7 +118,10 @@ public class MainActivity extends AppCompatActivity {
         try {
             cameraProvider.unbindAll();
             camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
-            runOnUiThread(() -> resultText.setText("준비 완료 — 촬영 버튼을 누르세요"));
+            runOnUiThread(() -> {
+                shrinkResult();
+                resultText.setText("준비 완료 — 촬영 버튼을 누르세요");
+            });
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -112,6 +130,7 @@ public class MainActivity extends AppCompatActivity {
     private void capturePhoto() {
         if (imageCapture == null || isAnalyzing) return;
         isAnalyzing = true;
+        resultText.setText("📸 촬영 중...");
 
         File outputFile = new File(getCacheDir(), "photo.jpg");
         ImageCapture.OutputFileOptions options = new ImageCapture.OutputFileOptions.Builder(outputFile).build();
@@ -163,7 +182,10 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     isAnalyzing = false;
                     if (response.isSuccessful()) {
-                        resultText.setText("✓ 분석 완료:\n" + extractAnswer(responseBody));
+                        String answer = extractAnswer(responseBody);
+                        resultText.setText("✓ 분석 완료:\n" + answer);
+                        expandResult();      // 자막창 확대
+                        startAutoScroll();   // 오토스크롤 시작
                     } else {
                         resultText.setText("API 오류: " + response.code());
                     }
@@ -176,6 +198,103 @@ public class MainActivity extends AppCompatActivity {
             }
         }).start();
     }
+
+    // ─── 자막창 크기 (TextView height만 변경) ───
+
+    /** 촬영 대기: 자막창 100dp */
+    private void shrinkResult() {
+        ViewGroup.LayoutParams p = resultText.getLayoutParams();
+        p.height = dp(100);
+        resultText.setLayoutParams(p);
+        resultText.scrollTo(0, 0);
+        scrollY = 0;
+    }
+
+    /** 분석 완료: 자막창 화면 50% */
+    private void expandResult() {
+        int half = getResources().getDisplayMetrics().heightPixels / 2;
+        ViewGroup.LayoutParams p = resultText.getLayoutParams();
+        p.height = half;
+        resultText.setLayoutParams(p);
+        resultText.scrollTo(0, 0);
+        scrollY = 0;
+    }
+
+    private int dp(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density);
+    }
+
+    // ─── 오토스크롤 (TextView.scrollTo 방식) ───
+
+    private void startAutoScroll() {
+        stopAutoScroll();
+        scrollingDown = true;
+        scrollRoundCount = 0;
+        scrollY = 0;
+
+        scrollRunnable = new Runnable() {
+            @Override
+            public void run() {
+                int lineHeight = resultText.getLineHeight();
+                int lineCount = resultText.getLineCount();
+                int viewHeight = resultText.getHeight();
+                int maxScroll = Math.max(0, lineHeight * lineCount - viewHeight);
+
+                if (maxScroll <= 0) {
+                    // 텍스트가 짧아 스크롤 불필요 → 바로 종료
+                    onScrollDone();
+                    return;
+                }
+
+                if (scrollingDown) {
+                    scrollY += 6;
+                    if (scrollY >= maxScroll) {
+                        scrollY = maxScroll;
+                        resultText.scrollTo(0, scrollY);
+                        scrollingDown = false;
+                        scrollHandler.postDelayed(this, 1500); // 하단 1.5초 멈춤
+                    } else {
+                        resultText.scrollTo(0, scrollY);
+                        scrollHandler.postDelayed(this, 30);
+                    }
+                } else {
+                    scrollY -= 6;
+                    if (scrollY <= 0) {
+                        scrollY = 0;
+                        resultText.scrollTo(0, scrollY);
+                        scrollRoundCount++;
+                        if (scrollRoundCount >= 2) {
+                            onScrollDone(); // 2왕복 완료
+                        } else {
+                            scrollingDown = true;
+                            scrollHandler.postDelayed(this, 1500); // 상단 1.5초 멈춤
+                        }
+                    } else {
+                        resultText.scrollTo(0, scrollY);
+                        scrollHandler.postDelayed(this, 30);
+                    }
+                }
+            }
+        };
+        scrollHandler.postDelayed(scrollRunnable, 1000); // 1초 후 시작
+    }
+
+    private void stopAutoScroll() {
+        if (scrollRunnable != null) {
+            scrollHandler.removeCallbacks(scrollRunnable);
+            scrollRunnable = null;
+        }
+    }
+
+    /** 2왕복 완료 → 자막 축소 + 대기 상태 */
+    private void onScrollDone() {
+        runOnUiThread(() -> {
+            shrinkResult();
+            resultText.setText("준비 완료 — 촬영 버튼을 누르세요");
+        });
+    }
+
+    // ─── JSON 파싱 ───
 
     private String extractAnswer(String jsonResponse) {
         try {
@@ -196,6 +315,9 @@ public class MainActivity extends AppCompatActivity {
                 keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
                 keyCode == KeyEvent.KEYCODE_BUTTON_A ||
                 keyCode == KeyEvent.KEYCODE_SPACE) {
+            stopAutoScroll();
+            isAnalyzing = false;
+            shrinkResult();
             capturePhoto();
             return true;
         }
