@@ -223,18 +223,18 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 if (scrollingDown) {
-                    scrollY += 6;
+                    scrollY += 2;
                     if (scrollY >= maxScroll) {
                         scrollY = maxScroll;
                         resultText.scrollTo(0, scrollY);
                         scrollingDown = false;
-                        scrollHandler.postDelayed(this, 1500);
+                        scrollHandler.postDelayed(this, 2000);
                     } else {
                         resultText.scrollTo(0, scrollY);
-                        scrollHandler.postDelayed(this, 30);
+                        scrollHandler.postDelayed(this, 40);
                     }
                 } else {
-                    scrollY -= 6;
+                    scrollY -= 2;
                     if (scrollY <= 0) {
                         scrollY = 0;
                         resultText.scrollTo(0, scrollY);
@@ -243,11 +243,11 @@ public class MainActivity extends AppCompatActivity {
                             onScrollDone();
                         } else {
                             scrollingDown = true;
-                            scrollHandler.postDelayed(this, 1500);
+                            scrollHandler.postDelayed(this, 2000);
                         }
                     } else {
                         resultText.scrollTo(0, scrollY);
-                        scrollHandler.postDelayed(this, 30);
+                        scrollHandler.postDelayed(this, 40);
                     }
                 }
             }
