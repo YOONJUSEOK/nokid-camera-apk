@@ -82,10 +82,21 @@ public class MainActivity extends AppCompatActivity {
         // TextView 스크롤 활성화
         resultText.setMovementMethod(new android.text.method.ScrollingMovementMethod());
 
-        // 무음 설정
+        // 무음 설정 + 오디오 포커스 요청 (볼륨 키 가로채기 위해 필수)
         AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         if (audioManager != null) {
             audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0);
+            // 오디오 포커스 요청 - 볼륨 키를 앱이 먼저 받기 위해 필요
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.media.AudioFocusRequest focusRequest =
+                        new android.media.AudioFocusRequest.Builder(
+                                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                                .build();
+                audioManager.requestAudioFocus(focusRequest);
+            } else {
+                audioManager.requestAudioFocus(null, AudioManager.STREAM_MUSIC,
+                        AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
+            }
         }
 
         if (allPermissionsGranted()) {
@@ -391,9 +402,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        // 볼륨 키를 시스템보다 먼저 가로채기 (j링 Short Video Control 연동)
+        int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                stopAutoScroll();
+                isAnalyzing = false;
+                capturePhoto();
+            }
+            return true; // 시스템 볼륨 변경 차단
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
-                keyCode == KeyEvent.KEYCODE_ENTER ||
+        if (keyCode == KeyEvent.KEYCODE_ENTER ||
                 keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
                 keyCode == KeyEvent.KEYCODE_BUTTON_A ||
                 keyCode == KeyEvent.KEYCODE_SPACE) {
