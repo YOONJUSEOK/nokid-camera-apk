@@ -56,6 +56,7 @@ public class JringBleService extends Service {
     public static final String ACTION_DISCONNECTED = "com.example.nokidcamera.BLE_DISCONNECTED";
     public static final String ACTION_BUTTON       = "com.example.nokidcamera.CAPTURE";
     public static final String ACTION_SCAN_RESULT  = "com.example.nokidcamera.BLE_SCAN_RESULT";
+    public static final String ACTION_BLE_DATA     = "com.example.nokidcamera.BLE_DATA"; // 디버그용
     public static final String EXTRA_DEVICE_NAME   = "device_name";
     public static final String EXTRA_DEVICE_ADDRESS = "device_address";
 
@@ -187,12 +188,20 @@ public class JringBleService extends Service {
                                             BluetoothGattCharacteristic characteristic) {
             byte[] data = characteristic.getValue();
 
-            // 수신 데이터 전체 로그 (디버그용)
+            // 수신 데이터 전체 로그 + 디버그 브로드캐스트
             StringBuilder sb = new StringBuilder();
             if (data != null) {
                 for (byte b : data) sb.append(String.format("%02X ", b));
             }
-            Log.d(TAG, "BLE 수신 [" + characteristic.getUuid() + "]: " + sb.toString().trim());
+            String hexStr = sb.toString().trim();
+            Log.d(TAG, "BLE 수신 [" + characteristic.getUuid() + "]: " + hexStr);
+
+            // 디버그 화면에 실시간 표시
+            Intent dataIntent = new Intent(ACTION_BLE_DATA);
+            dataIntent.putExtra("uuid", characteristic.getUuid().toString());
+            dataIntent.putExtra("hex", hexStr.isEmpty() ? "(empty)" : hexStr);
+            dataIntent.putExtra("len", data != null ? data.length : 0);
+            sendBroadcast(dataIntent);
 
             // 2초 쿨다운: 연속 수신 시 중복 촬영 방지
             long now = System.currentTimeMillis();
