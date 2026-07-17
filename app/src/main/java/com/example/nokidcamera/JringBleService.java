@@ -73,6 +73,7 @@ public class JringBleService extends Service {
     private boolean isScanning = false;
     private boolean isConnected = false;
     private boolean btWasOff = false;
+    private long lastTriggerTime = 0; // 중복 트리거 방지 쿨다운
 
     // 블루투스 ON/OFF 감지 리시버
     private final BroadcastReceiver btStateReceiver = new BroadcastReceiver() {
@@ -185,22 +186,25 @@ public class JringBleService extends Service {
         public void onCharacteristicChanged(BluetoothGatt gatt,
                                             BluetoothGattCharacteristic characteristic) {
             byte[] data = characteristic.getValue();
-            if (data == null || data.length == 0) return;
 
             // 수신 데이터 전체 로그 (디버그용)
             StringBuilder sb = new StringBuilder();
-            for (byte b : data) sb.append(String.format("%02X ", b));
+            if (data != null) {
+                for (byte b : data) sb.append(String.format("%02X ", b));
+            }
             Log.d(TAG, "BLE 수신 [" + characteristic.getUuid() + "]: " + sb.toString().trim());
 
-            // 버튼 이벤트 감지:
-            // - 첫 바이트 0x06 = DeviceAction 커맨드
-            // - data[1] == 0x01 또는 0x02 (버튼 종류)
-            // 완화된 조건: 0x06이면 무조건 트리거 (data[1] 무관)
-            if (data.length >= 1 && (data[0] & 0xFF) == 0x06) {
-                Log.d(TAG, ">>> j링 버튼 이벤트 감지! data[1]="
-                        + (data.length >= 2 ? String.format("%02X", data[1]) : "N/A"));
-                sendBroadcast(new Intent(ACTION_BUTTON));
+            // 2초 쿨다운: 연속 수신 시 중복 촬영 방지
+            long now = System.currentTimeMillis();
+            if (now - lastTriggerTime < 2000) {
+                Log.d(TAG, "쿨다운 중 무시 (" + (now - lastTriggerTime) + "ms)");
+                return;
             }
+            lastTriggerTime = now;
+
+            // 데이터 내용 무관하게 BLE Notification 수신 = 버튼 클릭으로 처리
+            Log.d(TAG, ">>> j링 버튼 이벤트! → 촬영 트리거");
+            sendBroadcast(new Intent(ACTION_BUTTON));
         }
 
         @Override
