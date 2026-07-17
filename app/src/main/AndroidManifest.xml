@@ -19,6 +19,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".JringCaptureReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.nokidcamera.CAPTURE" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

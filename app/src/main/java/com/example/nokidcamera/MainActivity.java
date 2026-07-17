@@ -1,6 +1,10 @@
 package com.example.nokidcamera;
 
 import android.Manifest;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.media.AudioManager;
 import android.os.Bundle;
@@ -37,6 +41,7 @@ import okhttp3.Response;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final String ACTION_JRING_CAPTURE = "com.example.nokidcamera.CAPTURE";
 
     private PreviewView previewView;
     private Button captureButton;
@@ -55,6 +60,9 @@ public class MainActivity extends AppCompatActivity {
     private int scrollY = 0;
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
+
+    // j링 스마트워치 BroadcastReceiver
+    private BroadcastReceiver jringReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -88,6 +96,47 @@ public class MainActivity extends AppCompatActivity {
             isAnalyzing = false;
             capturePhoto();
         });
+
+        // j링 BroadcastReceiver 등록
+        registerJringReceiver();
+    }
+
+    private void registerJringReceiver() {
+        jringReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (ACTION_JRING_CAPTURE.equals(intent.getAction())) {
+                    stopAutoScroll();
+                    isAnalyzing = false;
+                    capturePhoto();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(ACTION_JRING_CAPTURE);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(jringReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(jringReceiver, filter);
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && ACTION_JRING_CAPTURE.equals(intent.getAction())) {
+            stopAutoScroll();
+            isAnalyzing = false;
+            capturePhoto();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (jringReceiver != null) {
+            unregisterReceiver(jringReceiver);
+            jringReceiver = null;
+        }
     }
 
     private void startCamera() {
