@@ -76,11 +76,15 @@ public class JringBleService extends Service {
 
             Log.d(TAG, "Scan result: " + name + " [" + address + "]");
 
-            // j링 워치 이름 패턴 확인 (J-Ring, jring, JY 등)
-            boolean isJring = name.toLowerCase().contains("ring")
-                    || name.toLowerCase().contains("jy")
-                    || name.toLowerCase().contains("jring")
-                    || name.toLowerCase().contains("bracelet");
+            // j링 워치 이름 패턴 확인 (SR08, J-Ring, jring, JY, bracelet 등)
+            String nameLower = name.toLowerCase();
+            boolean isJring = nameLower.contains("sr08")
+                    || nameLower.contains("sr0")
+                    || nameLower.contains("ring")
+                    || nameLower.contains("jy")
+                    || nameLower.contains("jring")
+                    || nameLower.contains("bracelet")
+                    || nameLower.contains("ibracelet");
 
             Intent intent = new Intent(ACTION_SCAN_RESULT);
             intent.putExtra(EXTRA_DEVICE_NAME, name);
@@ -190,30 +194,15 @@ public class JringBleService extends Service {
         isScanning = true;
         Log.d(TAG, "BLE 스캔 시작");
 
-        // Service UUID 필터로 j링 워치만 스캔
-        List<ScanFilter> filters = new ArrayList<>();
-        try {
-            ScanFilter filter = new ScanFilter.Builder()
-                    .setServiceUuid(ParcelUuid.fromString(SERVICE_UUID))
-                    .build();
-            filters.add(filter);
-        } catch (Exception e) {
-            // 필터 없이 스캔
-        }
-
+        // 필터 없이 전체 BLE 장치 스캔 (SR08 등 다양한 이름 지원)
         ScanSettings settings = new ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build();
 
         try {
-            if (!filters.isEmpty()) {
-                bleScanner.startScan(filters, settings, scanCallback);
-            } else {
-                bleScanner.startScan(scanCallback);
-            }
+            bleScanner.startScan(null, settings, scanCallback);
         } catch (Exception e) {
             Log.e(TAG, "Scan start failed: " + e.getMessage());
-            // 필터 없이 재시도
             try {
                 bleScanner.startScan(scanCallback);
             } catch (Exception ex) {

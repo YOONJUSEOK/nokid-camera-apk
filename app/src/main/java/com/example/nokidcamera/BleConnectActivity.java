@@ -47,7 +47,7 @@ public class BleConnectActivity extends AppCompatActivity {
         statusText = new TextView(this);
         statusText.setTextColor(0xFFFFFFFF);
         statusText.setTextSize(16);
-        statusText.setText("j링 워치를 연결하려면 스캔을 시작하세요");
+        statusText.setText("j링 워치(SR08)를 연결하려면 스캔을 시작하세요");
         root.addView(statusText);
 
         scanButton = new Button(this);
@@ -80,6 +80,8 @@ public class BleConnectActivity extends AppCompatActivity {
         String savedName = prefs.getString("name", null);
         if (savedAddress != null) {
             statusText.setText("저장된 장치: " + savedName + "\n[" + savedAddress + "]\n\n재연결하려면 스캔 후 장치를 탭하세요");
+        } else {
+            statusText.setText("j링 워치(SR08)를 연결하려면\n스캔 시작 → 목록에서 SR08 탭");
         }
 
         setContentView(root);
