@@ -6,20 +6,44 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- BLE 권한 (Android 12 이상) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- BLE 권한 (Android 11 이하) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
     <application
         android:allowBackup="true"
         android:label="Nokid AI Cam"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.NoActionBar">
+
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".BleConnectActivity"
+            android:exported="false" />
+
+        <!-- j링 BLE 서비스 -->
+        <service
+            android:name=".JringBleService"
+            android:exported="false" />
+
+        <!-- j링 브로드캐스트 수신 (앱 백그라운드 시) -->
         <receiver
             android:name=".JringCaptureReceiver"
             android:exported="true">
@@ -27,6 +51,7 @@
                 <action android:name="com.example.nokidcamera.CAPTURE" />
             </intent-filter>
         </receiver>
+
     </application>
 
 </manifest>

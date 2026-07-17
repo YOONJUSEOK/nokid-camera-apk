@@ -5,8 +5,10 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.media.AudioManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -45,6 +47,7 @@ public class MainActivity extends AppCompatActivity {
 
     private PreviewView previewView;
     private Button captureButton;
+    private Button bleButton;
     private TextView resultText;
     private ImageCapture imageCapture;
     private Camera camera;
@@ -61,8 +64,10 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
-    // j링 스마트워치 BroadcastReceiver
+    // j링 BroadcastReceiver (포그라운드 수신)
     private BroadcastReceiver jringReceiver;
+    // BLE 상태 수신
+    private BroadcastReceiver bleStatusReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,6 +76,7 @@ public class MainActivity extends AppCompatActivity {
 
         previewView = findViewById(R.id.previewView);
         captureButton = findViewById(R.id.captureButton);
+        bleButton = findViewById(R.id.bleButton);
         resultText = findViewById(R.id.resultText);
 
         // TextView 스크롤 활성화
@@ -97,8 +103,30 @@ public class MainActivity extends AppCompatActivity {
             capturePhoto();
         });
 
-        // j링 BroadcastReceiver 등록
+        // j링 BLE 설정 버튼
+        bleButton.setOnClickListener(v -> {
+            startActivity(new Intent(this, BleConnectActivity.class));
+        });
+
+        // j링 BroadcastReceiver 등록 (포그라운드)
         registerJringReceiver();
+
+        // BLE 상태 수신
+        registerBleStatusReceiver();
+
+        // 저장된 j링 주소가 있으면 자동 연결
+        autoConnectJring();
+    }
+
+    private void autoConnectJring() {
+        SharedPreferences prefs = getSharedPreferences("jring_ble", MODE_PRIVATE);
+        String savedAddress = prefs.getString("address", null);
+        if (savedAddress != null) {
+            Intent intent = new Intent(this, JringBleService.class);
+            intent.putExtra("cmd", JringBleService.CMD_CONNECT);
+            intent.putExtra(JringBleService.EXTRA_DEVICE_ADDRESS, savedAddress);
+            startService(intent);
+        }
     }
 
     private void registerJringReceiver() {
@@ -113,10 +141,32 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         IntentFilter filter = new IntentFilter(ACTION_JRING_CAPTURE);
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(jringReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(jringReceiver, filter);
+        }
+    }
+
+    private void registerBleStatusReceiver() {
+        bleStatusReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                if (JringBleService.ACTION_CONNECTED.equals(action)) {
+                    if (bleButton != null) bleButton.setText("j링 ●");
+                } else if (JringBleService.ACTION_DISCONNECTED.equals(action)) {
+                    if (bleButton != null) bleButton.setText("j링 ○");
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(JringBleService.ACTION_CONNECTED);
+        filter.addAction(JringBleService.ACTION_DISCONNECTED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(bleStatusReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(bleStatusReceiver, filter);
         }
     }
 
@@ -137,10 +187,15 @@ public class MainActivity extends AppCompatActivity {
             unregisterReceiver(jringReceiver);
             jringReceiver = null;
         }
+        if (bleStatusReceiver != null) {
+            unregisterReceiver(bleStatusReceiver);
+            bleStatusReceiver = null;
+        }
     }
 
     private void startCamera() {
-        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+        ListenableFuture<ProcessCameraProvider> cameraProviderFuture =
+                ProcessCameraProvider.getInstance(this);
         cameraProviderFuture.addListener(() -> {
             try {
                 cameraProvider = cameraProviderFuture.get();
@@ -178,7 +233,8 @@ public class MainActivity extends AppCompatActivity {
         resultText.setText("📸 촬영 중...");
 
         File outputFile = new File(getCacheDir(), "photo.jpg");
-        ImageCapture.OutputFileOptions options = new ImageCapture.OutputFileOptions.Builder(outputFile).build();
+        ImageCapture.OutputFileOptions options =
+                new ImageCapture.OutputFileOptions.Builder(outputFile).build();
 
         imageCapture.takePicture(options, ContextCompat.getMainExecutor(this),
                 new ImageCapture.OnImageSavedCallback() {
@@ -206,7 +262,8 @@ public class MainActivity extends AppCompatActivity {
                         "  \"contents\": [{\n" +
                         "    \"parts\": [\n" +
                         "      {\"text\": \"이 이미지에 있는 문제를 풀고, 정답과 풀이 과정을 한국어로 간단하게 알려줘.\"},\n" +
-                        "      {\"inline_data\": {\"mime_type\": \"image/jpeg\", \"data\": \"" + base64Image + "\"}}\n" +
+                        "      {\"inline_data\": {\"mime_type\": \"image/jpeg\", \"data\": \""
+                        + base64Image + "\"}}\n" +
                         "    ]\n" +
                         "  }]\n" +
                         "}";
@@ -217,7 +274,8 @@ public class MainActivity extends AppCompatActivity {
                         .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                         .build();
                 Request request = new Request.Builder()
-                        .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=" + GEMINI_API_KEY)
+                        .url("https://generativelanguage.googleapis.com/v1beta/models/"
+                                + "gemini-3.1-flash-lite:generateContent?key=" + GEMINI_API_KEY)
                         .post(RequestBody.create(jsonBody, MediaType.parse("application/json")))
                         .build();
 
@@ -348,12 +406,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean allPermissionsGranted() {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.INTERNET) == PackageManager.PERMISSION_GRANTED;
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.INTERNET)
+                        == PackageManager.PERMISSION_GRANTED;
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (allPermissionsGranted()) {
