@@ -12,38 +12,44 @@ import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.ParcelUuid;
 import android.util.Log;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * j링 스마트워치와 직접 BLE 연결하여 버튼 이벤트를 수신하는 서비스.
+ * j링 스마트워치(SR08)와 직접 BLE 연결하여 버튼 이벤트를 수신하는 서비스.
  *
  * 프로토콜 분석 결과:
  * - Service UUID : 000056ff-0000-1000-8000-00805f9b34fb
  * - Notify Char  : 000033f3-0000-1000-8000-00805f9b34fb  (HJT_IBRACELETPLUS_TX)
- * - 버튼 클릭 데이터: 바이트 배열 [0x06, 0x01, ...]
- *   (첫 바이트 0x06 = DeviceAction 커맨드, 두 번째 바이트 0x01 = action 값)
+ * - 버튼 클릭 데이터: 첫 바이트 0x06 = DeviceAction 커맨드
+ *
+ * 개선사항 (v36):
+ * - 블루투스 ON/OFF 감지 → 자동 재연결
+ * - 데이터 패턴 완화: 첫 바이트 0x06이면 무조건 촬영 트리거
+ * - 모든 Notify Characteristic에 대해 수신 처리
+ * - 서비스 UUID 못 찾을 경우 모든 서비스의 Notify Char에 등록
  */
 public class JringBleService extends Service {
 
     private static final String TAG = "JringBleService";
 
     // j링 BLE UUID
-    public static final String SERVICE_UUID    = "000056ff-0000-1000-8000-00805f9b34fb";
+    public static final String SERVICE_UUID     = "000056ff-0000-1000-8000-00805f9b34fb";
     public static final String NOTIFY_CHAR_UUID = "000033f3-0000-1000-8000-00805f9b34fb";
-    public static final String CCCD_UUID       = "00002902-0000-1000-8000-00805f9b34fb";
+    public static final String CCCD_UUID        = "00002902-0000-1000-8000-00805f9b34fb";
 
     // 브로드캐스트 액션
     public static final String ACTION_CONNECTED    = "com.example.nokidcamera.BLE_CONNECTED";
@@ -54,16 +60,47 @@ public class JringBleService extends Service {
     public static final String EXTRA_DEVICE_ADDRESS = "device_address";
 
     // 인텐트 커맨드
-    public static final String CMD_SCAN   = "cmd_scan";
-    public static final String CMD_CONNECT = "cmd_connect";
+    public static final String CMD_SCAN       = "cmd_scan";
+    public static final String CMD_CONNECT    = "cmd_connect";
     public static final String CMD_DISCONNECT = "cmd_disconnect";
 
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothLeScanner bleScanner;
     private BluetoothGatt bluetoothGatt;
+    private String savedAddress = null;
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean isScanning = false;
     private boolean isConnected = false;
+    private boolean btWasOff = false;
+
+    // 블루투스 ON/OFF 감지 리시버
+    private final BroadcastReceiver btStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1);
+            if (state == BluetoothAdapter.STATE_ON) {
+                Log.d(TAG, "블루투스 켜짐 → 저장된 주소로 재연결 시도");
+                btWasOff = false;
+                bleScanner = bluetoothAdapter.getBluetoothLeScanner();
+                // 1초 후 재연결
+                mainHandler.postDelayed(() -> {
+                    if (savedAddress != null && !isConnected) {
+                        connect(savedAddress);
+                    }
+                }, 1000);
+            } else if (state == BluetoothAdapter.STATE_OFF) {
+                Log.d(TAG, "블루투스 꺼짐");
+                btWasOff = true;
+                isConnected = false;
+                if (bluetoothGatt != null) {
+                    bluetoothGatt.close();
+                    bluetoothGatt = null;
+                }
+                sendBroadcast(new Intent(ACTION_DISCONNECTED));
+            }
+        }
+    };
 
     // BLE 스캔 콜백
     private final ScanCallback scanCallback = new ScanCallback() {
@@ -74,9 +111,9 @@ public class JringBleService extends Service {
             String address = device.getAddress();
             if (name == null) name = "Unknown";
 
-            Log.d(TAG, "Scan result: " + name + " [" + address + "]");
+            Log.d(TAG, "Scan: " + name + " [" + address + "]");
 
-            // j링 워치 이름 패턴 확인 (SR08, J-Ring, jring, JY, bracelet 등)
+            // SR08 포함 다양한 이름 패턴
             String nameLower = name.toLowerCase();
             boolean isJring = nameLower.contains("sr08")
                     || nameLower.contains("sr0")
@@ -103,24 +140,29 @@ public class JringBleService extends Service {
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            Log.d(TAG, "onConnectionStateChange status=" + status + " newState=" + newState);
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.d(TAG, "Connected to GATT server");
+                Log.d(TAG, "GATT 연결됨");
                 isConnected = true;
                 stopScan();
-                // 서비스 검색 시작
-                mainHandler.postDelayed(() -> gatt.discoverServices(), 600);
+                mainHandler.postDelayed(() -> {
+                    if (gatt != null) gatt.discoverServices();
+                }, 600);
                 sendBroadcast(new Intent(ACTION_CONNECTED));
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.d(TAG, "Disconnected from GATT server");
+                Log.d(TAG, "GATT 연결 끊김 (status=" + status + ")");
                 isConnected = false;
                 sendBroadcast(new Intent(ACTION_DISCONNECTED));
-                // 3초 후 재연결 시도
+                // 연결 끊김 시 3초 후 재연결 (BT가 켜져 있을 때만)
                 mainHandler.postDelayed(() -> {
-                    if (bluetoothGatt != null) {
-                        String address = bluetoothGatt.getDevice().getAddress();
-                        bluetoothGatt.close();
-                        bluetoothGatt = null;
-                        connect(address);
+                    if (savedAddress != null && bluetoothAdapter != null
+                            && bluetoothAdapter.isEnabled()) {
+                        if (bluetoothGatt != null) {
+                            bluetoothGatt.close();
+                            bluetoothGatt = null;
+                        }
+                        Log.d(TAG, "재연결 시도: " + savedAddress);
+                        connect(savedAddress);
                     }
                 }, 3000);
             }
@@ -128,9 +170,14 @@ public class JringBleService extends Service {
 
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            Log.d(TAG, "onServicesDiscovered status=" + status);
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d(TAG, "Services discovered");
-                enableNotification(gatt);
+                // 서비스 목록 로그
+                List<BluetoothGattService> services = gatt.getServices();
+                for (BluetoothGattService svc : services) {
+                    Log.d(TAG, "  Service: " + svc.getUuid());
+                }
+                enableAllNotifications(gatt);
             }
         }
 
@@ -138,15 +185,20 @@ public class JringBleService extends Service {
         public void onCharacteristicChanged(BluetoothGatt gatt,
                                             BluetoothGattCharacteristic characteristic) {
             byte[] data = characteristic.getValue();
-            if (data == null || data.length < 2) return;
+            if (data == null || data.length == 0) return;
 
-            String uuid = characteristic.getUuid().toString();
-            Log.d(TAG, "Char changed: " + uuid + " data[0]=" + String.format("%02X", data[0])
-                    + " data[1]=" + String.format("%02X", data[1]));
+            // 수신 데이터 전체 로그 (디버그용)
+            StringBuilder sb = new StringBuilder();
+            for (byte b : data) sb.append(String.format("%02X ", b));
+            Log.d(TAG, "BLE 수신 [" + characteristic.getUuid() + "]: " + sb.toString().trim());
 
-            // 커맨드 0x06 = DeviceAction, data[1] = action 값
-            if (data[0] == 0x06 && data[1] == 0x01) {
-                Log.d(TAG, "j링 버튼 클릭 감지! → nokid 촬영 트리거");
+            // 버튼 이벤트 감지:
+            // - 첫 바이트 0x06 = DeviceAction 커맨드
+            // - data[1] == 0x01 또는 0x02 (버튼 종류)
+            // 완화된 조건: 0x06이면 무조건 트리거 (data[1] 무관)
+            if (data.length >= 1 && (data[0] & 0xFF) == 0x06) {
+                Log.d(TAG, ">>> j링 버튼 이벤트 감지! data[1]="
+                        + (data.length >= 2 ? String.format("%02X", data[1]) : "N/A"));
                 sendBroadcast(new Intent(ACTION_BUTTON));
             }
         }
@@ -154,7 +206,7 @@ public class JringBleService extends Service {
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor,
                                       int status) {
-            Log.d(TAG, "Descriptor write status: " + status);
+            Log.d(TAG, "DescriptorWrite: " + descriptor.getUuid() + " status=" + status);
         }
     };
 
@@ -165,9 +217,24 @@ public class JringBleService extends Service {
                 (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
         if (bluetoothManager != null) {
             bluetoothAdapter = bluetoothManager.getAdapter();
-            bleScanner = bluetoothAdapter.getBluetoothLeScanner();
+            if (bluetoothAdapter != null && bluetoothAdapter.isEnabled()) {
+                bleScanner = bluetoothAdapter.getBluetoothLeScanner();
+            }
         }
-        Log.d(TAG, "JringBleService created");
+
+        // 블루투스 상태 변화 감지 등록
+        IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(btStateReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(btStateReceiver, filter);
+        }
+
+        // 저장된 주소 로드
+        SharedPreferences prefs = getSharedPreferences("jring_ble", MODE_PRIVATE);
+        savedAddress = prefs.getString("address", null);
+
+        Log.d(TAG, "JringBleService 생성됨. savedAddress=" + savedAddress);
     }
 
     @Override
@@ -175,26 +242,38 @@ public class JringBleService extends Service {
         if (intent == null) return START_STICKY;
 
         String cmd = intent.getStringExtra("cmd");
+        Log.d(TAG, "onStartCommand cmd=" + cmd);
+
         if (CMD_SCAN.equals(cmd)) {
             startScan();
         } else if (CMD_CONNECT.equals(cmd)) {
             String address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS);
-            if (address != null) connect(address);
+            if (address != null) {
+                savedAddress = address;
+                // SharedPreferences에도 저장
+                getSharedPreferences("jring_ble", MODE_PRIVATE)
+                        .edit().putString("address", address).apply();
+                connect(address);
+            }
         } else if (CMD_DISCONNECT.equals(cmd)) {
+            savedAddress = null;
             disconnect();
         }
         return START_STICKY;
     }
 
     private void startScan() {
-        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) return;
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.e(TAG, "BT 꺼져 있음, 스캔 불가");
+            return;
+        }
         if (isScanning) return;
         if (bleScanner == null) bleScanner = bluetoothAdapter.getBluetoothLeScanner();
+        if (bleScanner == null) return;
 
         isScanning = true;
         Log.d(TAG, "BLE 스캔 시작");
 
-        // 필터 없이 전체 BLE 장치 스캔 (SR08 등 다양한 이름 지원)
         ScanSettings settings = new ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build();
@@ -207,10 +286,10 @@ public class JringBleService extends Service {
                 bleScanner.startScan(scanCallback);
             } catch (Exception ex) {
                 Log.e(TAG, "Scan retry failed: " + ex.getMessage());
+                isScanning = false;
             }
         }
 
-        // 30초 후 스캔 중지
         mainHandler.postDelayed(this::stopScan, 30000);
     }
 
@@ -225,12 +304,16 @@ public class JringBleService extends Service {
     }
 
     private void connect(String address) {
-        if (bluetoothAdapter == null) return;
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.e(TAG, "BT 꺼져 있음, 연결 불가");
+            return;
+        }
         try {
             BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
-            Log.d(TAG, "Connecting to: " + address);
+            Log.d(TAG, "연결 시도: " + address);
             if (bluetoothGatt != null) {
                 bluetoothGatt.close();
+                bluetoothGatt = null;
             }
             bluetoothGatt = device.connectGatt(this, false, gattCallback,
                     BluetoothDevice.TRANSPORT_LE);
@@ -248,34 +331,52 @@ public class JringBleService extends Service {
         isConnected = false;
     }
 
-    private void enableNotification(BluetoothGatt gatt) {
+    /**
+     * 모든 서비스의 Notify 가능한 Characteristic에 Notification 등록.
+     * j링 Service UUID가 없는 경우에도 동작하도록 폴백 처리.
+     */
+    private void enableAllNotifications(BluetoothGatt gatt) {
+        boolean found = false;
+
+        // 1순위: j링 전용 Service + Char
+        BluetoothGattService targetService = gatt.getService(UUID.fromString(SERVICE_UUID));
+        if (targetService != null) {
+            BluetoothGattCharacteristic ch =
+                    targetService.getCharacteristic(UUID.fromString(NOTIFY_CHAR_UUID));
+            if (ch != null) {
+                enableNotification(gatt, ch);
+                found = true;
+                Log.d(TAG, "j링 전용 Char에 Notification 등록 완료");
+            }
+        }
+
+        // 2순위: 모든 서비스의 모든 Notify Char에 등록 (폴백)
+        if (!found) {
+            Log.d(TAG, "j링 Service 없음 → 모든 Notify Char에 등록 시도");
+            for (BluetoothGattService svc : gatt.getServices()) {
+                for (BluetoothGattCharacteristic ch : svc.getCharacteristics()) {
+                    int props = ch.getProperties();
+                    if ((props & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+                            || (props & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
+                        Log.d(TAG, "  Notify 등록: " + ch.getUuid());
+                        enableNotification(gatt, ch);
+                    }
+                }
+            }
+        }
+    }
+
+    private void enableNotification(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
         try {
-            BluetoothGattService service = gatt.getService(UUID.fromString(SERVICE_UUID));
-            if (service == null) {
-                Log.e(TAG, "Service not found: " + SERVICE_UUID);
-                return;
-            }
-
-            BluetoothGattCharacteristic characteristic =
-                    service.getCharacteristic(UUID.fromString(NOTIFY_CHAR_UUID));
-            if (characteristic == null) {
-                Log.e(TAG, "Characteristic not found: " + NOTIFY_CHAR_UUID);
-                return;
-            }
-
-            // Notification 활성화
             gatt.setCharacteristicNotification(characteristic, true);
-
-            // CCCD 디스크립터 설정
             BluetoothGattDescriptor descriptor =
                     characteristic.getDescriptor(UUID.fromString(CCCD_UUID));
             if (descriptor != null) {
                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                 gatt.writeDescriptor(descriptor);
-                Log.d(TAG, "Notification enabled for: " + NOTIFY_CHAR_UUID);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Enable notification error: " + e.getMessage());
+            Log.e(TAG, "enableNotification error: " + e.getMessage());
         }
     }
 
@@ -287,6 +388,9 @@ public class JringBleService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        try {
+            unregisterReceiver(btStateReceiver);
+        } catch (Exception ignored) {}
         stopScan();
         disconnect();
     }
