@@ -184,10 +184,34 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        if (intent != null && ACTION_JRING_CAPTURE.equals(intent.getAction())) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        if (ACTION_JRING_CAPTURE.equals(action)
+                || android.provider.MediaStore.ACTION_IMAGE_CAPTURE.equals(action)
+                || "android.media.action.STILL_IMAGE_CAMERA".equals(action)
+                || "android.intent.action.CAMERA_BUTTON".equals(action)) {
             stopAutoScroll();
             isAnalyzing = false;
             capturePhoto();
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        // j링 원격 카메라로 실행된 경우 자동 촬영
+        Intent intent = getIntent();
+        if (intent != null) {
+            String action = intent.getAction();
+            if (android.provider.MediaStore.ACTION_IMAGE_CAPTURE.equals(action)
+                    || "android.media.action.STILL_IMAGE_CAMERA".equals(action)
+                    || "android.intent.action.CAMERA_BUTTON".equals(action)) {
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    stopAutoScroll();
+                    isAnalyzing = false;
+                    capturePhoto();
+                }, 1500); // 카메라 초기화 대기
+            }
         }
     }
 
