@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.media.AudioManager;
 import android.os.Build;
@@ -44,30 +43,22 @@ import okhttp3.Response;
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final String ACTION_JRING_CAPTURE = "com.example.nokidcamera.CAPTURE";
+    private static final long CAPTURE_COOLDOWN_MS = 2000; // 2초 쿨다운
 
     private PreviewView previewView;
     private Button captureButton;
-    private Button bleButton;
     private TextView resultText;
     private ImageCapture imageCapture;
     private Camera camera;
     private ProcessCameraProvider cameraProvider;
 
     private boolean isAnalyzing = false;
-
-    // 오토스크롤
-    private final Handler scrollHandler = new Handler(Looper.getMainLooper());
-    private Runnable scrollRunnable;
-    private boolean scrollingDown = true;
-    private int scrollRoundCount = 0;
-    private int scrollY = 0;
+    private long lastCaptureTime = 0;
 
     private static final String GEMINI_API_KEY = BuildConfig.GEMINI_API_KEY;
 
     // j링 BroadcastReceiver (포그라운드 수신)
     private BroadcastReceiver jringReceiver;
-    // BLE 상태 수신
-    private BroadcastReceiver bleStatusReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,10 +67,9 @@ public class MainActivity extends AppCompatActivity {
 
         previewView = findViewById(R.id.previewView);
         captureButton = findViewById(R.id.captureButton);
-        bleButton = findViewById(R.id.bleButton);
         resultText = findViewById(R.id.resultText);
 
-        // TextView 스크롤 활성화
+        // TextView 스크롤 활성화 (스크롤 필요시만)
         resultText.setMovementMethod(new android.text.method.ScrollingMovementMethod());
 
         // 무음 설정 + 오디오 포커스 요청 (볼륨 키 가로채기 위해 필수)
@@ -109,35 +99,14 @@ public class MainActivity extends AppCompatActivity {
         }
 
         captureButton.setOnClickListener(v -> {
-            stopAutoScroll();
             isAnalyzing = false;
             capturePhoto();
-        });
-
-        // j링 BLE 설정 버튼
-        bleButton.setOnClickListener(v -> {
-            startActivity(new Intent(this, BleConnectActivity.class));
         });
 
         // j링 BroadcastReceiver 등록 (포그라운드)
         registerJringReceiver();
 
-        // BLE 상태 수신
-        registerBleStatusReceiver();
-
-        // 저장된 j링 주소가 있으면 자동 연결
-        autoConnectJring();
-    }
-
-    private void autoConnectJring() {
-        SharedPreferences prefs = getSharedPreferences("jring_ble", MODE_PRIVATE);
-        String savedAddress = prefs.getString("address", null);
-        if (savedAddress != null) {
-            Intent intent = new Intent(this, JringBleService.class);
-            intent.putExtra("cmd", JringBleService.CMD_CONNECT);
-            intent.putExtra(JringBleService.EXTRA_DEVICE_ADDRESS, savedAddress);
-            startService(intent);
-        }
+        resultText.setText("준비 완료 — 촬영 버튼을 누르세요");
     }
 
     private void registerJringReceiver() {
@@ -145,7 +114,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceive(Context context, Intent intent) {
                 if (ACTION_JRING_CAPTURE.equals(intent.getAction())) {
-                    stopAutoScroll();
                     isAnalyzing = false;
                     capturePhoto();
                 }
@@ -159,28 +127,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void registerBleStatusReceiver() {
-        bleStatusReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                String action = intent.getAction();
-                if (JringBleService.ACTION_CONNECTED.equals(action)) {
-                    if (bleButton != null) bleButton.setText("j링 ●");
-                } else if (JringBleService.ACTION_DISCONNECTED.equals(action)) {
-                    if (bleButton != null) bleButton.setText("j링 ○");
-                }
-            }
-        };
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(JringBleService.ACTION_CONNECTED);
-        filter.addAction(JringBleService.ACTION_DISCONNECTED);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(bleStatusReceiver, filter, Context.RECEIVER_EXPORTED);
-        } else {
-            registerReceiver(bleStatusReceiver, filter);
-        }
-    }
-
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -190,7 +136,6 @@ public class MainActivity extends AppCompatActivity {
                 || android.provider.MediaStore.ACTION_IMAGE_CAPTURE.equals(action)
                 || "android.media.action.STILL_IMAGE_CAMERA".equals(action)
                 || "android.intent.action.CAMERA_BUTTON".equals(action)) {
-            stopAutoScroll();
             isAnalyzing = false;
             capturePhoto();
         }
@@ -207,7 +152,6 @@ public class MainActivity extends AppCompatActivity {
                     || "android.media.action.STILL_IMAGE_CAMERA".equals(action)
                     || "android.intent.action.CAMERA_BUTTON".equals(action)) {
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    stopAutoScroll();
                     isAnalyzing = false;
                     capturePhoto();
                 }, 1500); // 카메라 초기화 대기
@@ -222,83 +166,87 @@ public class MainActivity extends AppCompatActivity {
             unregisterReceiver(jringReceiver);
             jringReceiver = null;
         }
-        if (bleStatusReceiver != null) {
-            unregisterReceiver(bleStatusReceiver);
-            bleStatusReceiver = null;
-        }
     }
 
     private void startCamera() {
         ListenableFuture<ProcessCameraProvider> cameraProviderFuture =
                 ProcessCameraProvider.getInstance(this);
+
         cameraProviderFuture.addListener(() -> {
             try {
                 cameraProvider = cameraProviderFuture.get();
-                bindPreview();
+
+                Preview preview = new Preview.Builder().build();
+                preview.setSurfaceProvider(previewView.getSurfaceProvider());
+
+                imageCapture = new ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .build();
+
+                CameraSelector cameraSelector = new CameraSelector.Builder()
+                        .requireLensFacing(CameraSelector.LENS_FACING_BACK)
+                        .build();
+
+                cameraProvider.unbindAll();
+                camera = cameraProvider.bindToLifecycle(
+                        this, cameraSelector, preview, imageCapture);
+
             } catch (ExecutionException | InterruptedException e) {
                 e.printStackTrace();
             }
-        }, ContextCompat.getMainExecutor(this));
-    }
-
-    private void bindPreview() {
-        Preview preview = new Preview.Builder().build();
-        preview.setSurfaceProvider(previewView.getSurfaceProvider());
-
-        imageCapture = new ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build();
-
-        CameraSelector cameraSelector = new CameraSelector.Builder()
-                .requireLensFacing(CameraSelector.LENS_FACING_BACK)
-                .build();
-
-        try {
-            cameraProvider.unbindAll();
-            camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
-            runOnUiThread(() -> resultText.setText("준비 완료 — 촬영 버튼을 누르세요"));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        }, getMainExecutor());
     }
 
     private void capturePhoto() {
-        if (imageCapture == null || isAnalyzing) return;
+        // 연속 촬영 방지 (쿨다운)
+        long now = System.currentTimeMillis();
+        if (now - lastCaptureTime < CAPTURE_COOLDOWN_MS) {
+            return;
+        }
+        lastCaptureTime = now;
+
+        if (isAnalyzing || imageCapture == null) {
+            return;
+        }
+
         isAnalyzing = true;
-        resultText.setText("📸 촬영 중...");
+        resultText.setText("분석 중...");
 
-        File outputFile = new File(getCacheDir(), "photo.jpg");
-        ImageCapture.OutputFileOptions options =
-                new ImageCapture.OutputFileOptions.Builder(outputFile).build();
+        File photoFile = new File(getCacheDir(), "photo_" + System.currentTimeMillis() + ".jpg");
 
-        imageCapture.takePicture(options, ContextCompat.getMainExecutor(this),
+        ImageCapture.OutputFileOptions outputOptions =
+                new ImageCapture.OutputFileOptions.Builder(photoFile).build();
+
+        imageCapture.takePicture(outputOptions, getMainExecutor(),
                 new ImageCapture.OnImageSavedCallback() {
                     @Override
                     public void onImageSaved(@NonNull ImageCapture.OutputFileResults results) {
-                        resultText.setText("분석 중...");
-                        analyzeImage(outputFile);
+                        analyzeWithGemini(photoFile);
                     }
 
                     @Override
                     public void onError(@NonNull ImageCaptureException exception) {
-                        isAnalyzing = false;
-                        resultText.setText("촬영 실패: " + exception.getMessage());
+                        runOnUiThread(() -> {
+                            isAnalyzing = false;
+                            resultText.setText("촬영 오류: " + exception.getMessage());
+                        });
                     }
                 });
     }
 
-    private void analyzeImage(File imageFile) {
+    private void analyzeWithGemini(File photoFile) {
         new Thread(() -> {
             try {
-                byte[] imageData = Files.readAllBytes(imageFile.toPath());
-                String base64Image = Base64.encodeToString(imageData, Base64.NO_WRAP);
+                byte[] imageBytes = Files.readAllBytes(photoFile.toPath());
+                String base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP);
 
                 String jsonBody = "{\n" +
                         "  \"contents\": [{\n" +
-                        "    \"parts\": [\n" +
-                        "      {\"text\": \"이 이미지에 있는 문제를 풀고, 정답과 풀이 과정을 한국어로 간단하게 알려줘.\"},\n" +
-                        "      {\"inline_data\": {\"mime_type\": \"image/jpeg\", \"data\": \""
-                        + base64Image + "\"}}\n" +
+                        "    \"parts\": [{\n" +
+                        "      \"text\": \"이 사진의 문제를 분석하고 정답과 풀이를 제시하세요. 정답만 간단히 말해주세요.\"\n" +
+                        "    }, {\n" +
+                        "      \"inline_data\": {\"mime_type\": \"image/jpeg\", \"data\": \"" +
+                        base64Image + "\"}}\n" +
                         "    ]\n" +
                         "  }]\n" +
                         "}";
@@ -321,9 +269,7 @@ public class MainActivity extends AppCompatActivity {
                     isAnalyzing = false;
                     if (response.isSuccessful()) {
                         String answer = extractAnswer(responseBody);
-                        resultText.setText("✓ 분석 완료:\n" + answer);
-                        resultText.scrollTo(0, 0);
-                        startAutoScroll();
+                        resultText.setText("✓ " + answer);
                     } else {
                         resultText.setText("API 오류: " + response.code());
                     }
@@ -335,80 +281,6 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         }).start();
-    }
-
-    // ─── 오토스크롤 (TextView.scrollTo 방식, 레이아웃 변경 없음) ───
-
-    private void startAutoScroll() {
-        stopAutoScroll();
-        scrollingDown = true;
-        scrollRoundCount = 0;
-        scrollY = 0;
-
-        scrollRunnable = new Runnable() {
-            @Override
-            public void run() {
-                android.text.Layout layout = resultText.getLayout();
-                if (layout == null) {
-                    scrollHandler.postDelayed(this, 100);
-                    return;
-                }
-                int textHeight = layout.getHeight();
-                int viewHeight = resultText.getHeight()
-                        - resultText.getPaddingTop()
-                        - resultText.getPaddingBottom();
-                int maxScroll = Math.max(0, textHeight - viewHeight);
-
-                if (maxScroll <= 0) {
-                    onScrollDone();
-                    return;
-                }
-
-                if (scrollingDown) {
-                    scrollY += 2;
-                    if (scrollY >= maxScroll) {
-                        scrollY = maxScroll;
-                        resultText.scrollTo(0, scrollY);
-                        scrollingDown = false;
-                        scrollHandler.postDelayed(this, 2000);
-                    } else {
-                        resultText.scrollTo(0, scrollY);
-                        scrollHandler.postDelayed(this, 40);
-                    }
-                } else {
-                    scrollY -= 2;
-                    if (scrollY <= 0) {
-                        scrollY = 0;
-                        resultText.scrollTo(0, scrollY);
-                        scrollRoundCount++;
-                        if (scrollRoundCount >= 2) {
-                            onScrollDone();
-                        } else {
-                            scrollingDown = true;
-                            scrollHandler.postDelayed(this, 2000);
-                        }
-                    } else {
-                        resultText.scrollTo(0, scrollY);
-                        scrollHandler.postDelayed(this, 40);
-                    }
-                }
-            }
-        };
-        scrollHandler.postDelayed(scrollRunnable, 1000);
-    }
-
-    private void stopAutoScroll() {
-        if (scrollRunnable != null) {
-            scrollHandler.removeCallbacks(scrollRunnable);
-            scrollRunnable = null;
-        }
-    }
-
-    private void onScrollDone() {
-        runOnUiThread(() -> {
-            resultText.scrollTo(0, 0);
-            resultText.setText("준비 완료 — 촬영 버튼을 누르세요");
-        });
     }
 
     // ─── JSON 파싱 ───
@@ -431,7 +303,6 @@ public class MainActivity extends AppCompatActivity {
         int keyCode = event.getKeyCode();
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                stopAutoScroll();
                 isAnalyzing = false;
                 capturePhoto();
             }
@@ -446,7 +317,6 @@ public class MainActivity extends AppCompatActivity {
                 keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
                 keyCode == KeyEvent.KEYCODE_BUTTON_A ||
                 keyCode == KeyEvent.KEYCODE_SPACE) {
-            stopAutoScroll();
             isAnalyzing = false;
             capturePhoto();
             return true;

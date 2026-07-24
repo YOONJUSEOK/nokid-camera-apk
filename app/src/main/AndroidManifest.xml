@@ -6,17 +6,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- BLE 권한 (Android 12 이상) -->
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-        android:usesPermissionFlags="neverForLocation" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- BLE 권한 (Android 11 이하) -->
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -47,37 +37,7 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".BleConnectActivity"
-            android:exported="false" />
 
-        <!-- j링 BLE 서비스 -->
-        <service
-            android:name=".JringBleService"
-            android:exported="false" />
-
-        <!-- j링 접근성 서비스 - 백그라운드 볼륨 키 감지 -->
-        <service
-            android:name=".JringAccessibilityService"
-            android:exported="true"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-            android:label="Nokid j링 원격 촬영">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
-
-        <!-- j링 브로드캐스트 수신 (앱 백그라운드 시) -->
-        <receiver
-            android:name=".JringCaptureReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.example.nokidcamera.CAPTURE" />
-            </intent-filter>
-        </receiver>
 
     </application>
 

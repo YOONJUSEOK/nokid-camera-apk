@@ -11,32 +11,14 @@
         android:layout_height="0dp"
         android:layout_weight="6" />
 
-    <LinearLayout
+    <Button
+        android:id="@+id/captureButton"
         android:layout_width="match_parent"
         android:layout_height="50dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/captureButton"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="3"
-            android:text="촬영"
-            android:textSize="16sp"
-            android:background="#667eea"
-            android:textColor="#ffffff" />
-
-        <Button
-            android:id="@+id/bleButton"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:text="j링 ○"
-            android:textSize="12sp"
-            android:background="#333333"
-            android:textColor="#aaaaaa" />
-
-    </LinearLayout>
+        android:text="촬영"
+        android:textSize="16sp"
+        android:background="#667eea"
+        android:textColor="#ffffff" />
 
     <TextView
         android:id="@+id/resultText"
